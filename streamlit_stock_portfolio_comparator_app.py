@@ -7,15 +7,14 @@
 # yfinance: The library that fetches stock data from Yahoo Finance.
 # numpy: Needed for math calculations (sqrt, etc.).
 # altair: Needed for advanced charts like the Scatter Plot.
-# sklearn: Needed for Machine Learning (Logistic Regression).
+# sklearn: Needed for Machine Learning.
 import streamlit as st
 import pandas as pd
 import yfinance as yf
 import numpy as np 
 import altair as alt 
-from sklearn.linear_model import LogisticRegression
-from sklearn.ensemble import RandomForestClassifier
-from sklearn.metrics import accuracy_score, confusion_matrix
+from sklearn.ensemble import RandomForestRegressor # Changed to Regressor
+from sklearn.metrics import mean_absolute_error, r2_score # Metrics for Regression
 
 # This must be the first Streamlit command. It sets up the page title and layout.
 st.set_page_config(page_title="Stock Comparator", layout="wide")
@@ -93,24 +92,20 @@ def calculate_metrics(df):
     
     return summary
 
-def prepare_volatility_data(series, window=5):
+def prepare_regression_data(series, window=5):
     """
-    Prepares data to predict HIGH VOLATILITY.
+    Prepares data to predict EXACT VOLATILITY (Regression).
     - Input: Price Series
-    - Target: 1 if tomorrow's absolute return is in the top 20% of history (High Vol).
-    - Features: Past 5 days' absolute returns (volatility clusters).
+    - Target: The absolute return (magnitude of move) of the NEXT day.
+    - Features: Past 5 days' absolute returns.
     """
     df = series.to_frame(name='Close')
     
-    # Calculate absolute daily returns (magnitude of move)
+    # Calculate absolute daily returns (volatility proxy)
     df['Abs_Return'] = df['Close'].pct_change().abs()
     
-    # Define "High Volatility" as the top 25% of moves
-    # This threshold is dynamic based on the stock's own history
-    threshold = df['Abs_Return'].quantile(0.75)
-    
-    # Target: 1 if tomorrow's move is big, 0 if normal
-    df['Target'] = (df['Abs_Return'].shift(-1) > threshold).astype(int)
+    # Target: Tomorrow's absolute return (Continuous number)
+    df['Target'] = df['Abs_Return'].shift(-1)
     
     # Features: Recent volatility (Lag 1 to Lag 5)
     for i in range(1, window + 1):
@@ -119,7 +114,7 @@ def prepare_volatility_data(series, window=5):
     df = df.dropna()
     
     feature_cols = [f'Vol_Lag_{i}' for i in range(1, window + 1)]
-    return df[feature_cols], df['Target'], threshold
+    return df[feature_cols], df['Target']
 
 # -----------------------------------------------------------------------------
 # SNIPPET 2: SIDEBAR CONTROLS
@@ -440,14 +435,14 @@ try:
         st.dataframe(formatted_metrics)
 
         # -----------------------------------------------------------------------------
-        # SNIPPET 7: MACHINE LEARNING (Updated for Volatility)
+        # SNIPPET 7: MACHINE LEARNING (Updated for Regression)
         # -----------------------------------------------------------------------------
         st.markdown("---")
         st.header("🤖 Machine Learning: Volatility Prediction")
         
         st.write("""
-        This model predicts whether **Tomorrow's Volatility** will be **HIGH** (Top 25% of movements) or **NORMAL**.
-        It uses the past 5 days of volatility to learn patterns (Volatility Clustering).
+        This model predicts the **Exact Volatility** (Absolute Daily Return) for the next trading day.
+        It uses the past 5 days of volatility to learn patterns using a Random Forest Regressor.
         """)
         
         # 1. User Selects a Stock
@@ -458,8 +453,8 @@ try:
             # 2. Prepare Data
             subset_series = cleaned_df[ml_ticker]
             
-            # Use our new helper function for Volatility Classification
-            X, y, threshold = prepare_volatility_data(subset_series)
+            # Use our new helper function for Regression
+            X, y = prepare_regression_data(subset_series)
             
             if len(X) > 50:
                 # 3. Split Data
@@ -467,28 +462,37 @@ try:
                 X_train, X_test = X.iloc[:split_index], X.iloc[split_index:]
                 y_train, y_test = y.iloc[:split_index], y.iloc[split_index:]
                 
-                # 4. Train Model (Random Forest is often better for this than LogReg)
-                model = RandomForestClassifier(n_estimators=100, random_state=42)
+                # 4. Train Model (Random Forest Regressor)
+                model = RandomForestRegressor(n_estimators=100, random_state=42)
                 model.fit(X_train, y_train)
                 
                 # 5. Evaluate
                 preds = model.predict(X_test)
-                acc = accuracy_score(y_test, preds)
+                mae = mean_absolute_error(y_test, preds)
                 
                 # Display Results
                 st.markdown(f"#### Volatility Forecast for **{smi_companies.get(ml_ticker, ml_ticker)}**")
-                st.write(f"**High Volatility Threshold:** > {threshold:.2%} move per day")
-                st.metric("Model Accuracy", f"{acc:.2%}")
                 
-                # Confusion Matrix
-                st.write("**Confusion Matrix:**")
-                cm = confusion_matrix(y_test, preds)
-                cm_df = pd.DataFrame(cm, 
-                                     index=['Actual Normal', 'Actual High Vol'], 
-                                     columns=['Pred Normal', 'Pred High Vol'])
-                st.dataframe(cm_df)
+                # Show the predicted volatility for the NEXT day (using the very latest data)
+                last_5_days = X.iloc[-1:].values
+                next_day_pred = model.predict(last_5_days)[0]
                 
-                st.caption("Volatility often 'clusters' (big moves follow big moves). This model tries to exploit that pattern.")
+                col1, col2 = st.columns(2)
+                col1.metric("Predicted Volatility (Next Day)", f"{next_day_pred:.2%}")
+                col2.metric("Mean Absolute Error (Test Set)", f"{mae:.2%}")
+                
+                # Visualization: Predicted vs Actual
+                # Create a DataFrame for plotting
+                results_df = pd.DataFrame({
+                    'Date': y_test.index,
+                    'Actual Volatility': y_test.values,
+                    'Predicted Volatility': preds
+                }).set_index('Date')
+                
+                st.write("**Predicted vs. Actual Volatility (Test Set):**")
+                st.line_chart(results_df)
+                
+                st.caption("Lower MAE is better. If the lines overlap, the model is doing a good job.")
                 
             else:
                 st.warning("Not enough data. Try a longer date range.")

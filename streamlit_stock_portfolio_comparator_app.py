@@ -217,17 +217,17 @@ try:
         st.subheader("📉 Risk & Return Metrics")
         
         # 1. Call our helper function
-        # Note: We pass 'cleaned_df' (Tickers) not 'display_df' (Names) if we want to process logic later,
-        # but for simple display, we can just map the index afterwards.
         metrics_df = calculate_metrics(cleaned_df)
         
         # 2. Rename the Index (Rows) to Full Company Names
         metrics_df = metrics_df.rename(index=smi_companies)
 
         # 3. NEW: SCATTER PLOT (Risk vs Return)
-        # We need to transform the data slightly for the scatter plot
-        # We reset the index so 'Company Name' becomes a column, not the index.
-        scatter_data = metrics_df.reset_index().rename(columns={'index': 'Company'})
+        # We need to transform the data slightly for the scatter plot.
+        # FIX: Explicitly name the index 'Company' BEFORE resetting.
+        # This prevents errors where the index might be named 'Ticker' or None.
+        metrics_df.index.name = "Company"
+        scatter_data = metrics_df.reset_index()
         
         # Create an Altair Chart
         # X-Axis: Annualized Volatility (Risk)

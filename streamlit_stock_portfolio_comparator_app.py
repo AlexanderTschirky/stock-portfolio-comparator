@@ -82,7 +82,7 @@ def prepare_regression_data(series, window=21):
 with st.sidebar: # We use st.sidebar to place everything inside this block on the sidebar on the left.
     st.header("🎛️ Controls") # This is the header of the sidebar.
 
-    # 1. TICKER SELECTION
+    # 1. STOCK SELECTION
     smi_companies = { # We open a dictionary for the stocks that can be picked.
         "^SSMI": "🇨🇭 Swiss Market Index (Benchmark)", # We add the SMI as the Benchmark for our Risk-Return-Analysis.
         "ROG.SW": "Roche", # For each stock, we ad the ticker symbols to get the data from yfinance aswell as the company name to make the application more user-friendly.
@@ -107,11 +107,11 @@ with st.sidebar: # We use st.sidebar to place everything inside this block on th
     }
 
 
-    selectable_stocks = [t for t in smi_companies.keys() if t != "^SSMI"] # We exclude the SMI from the dropdown options to make sure the Benchmark Index cannot be manually deselected.
+    selectable_tickers = [t for t in smi_companies.keys() if t != "^SSMI"] # We exclude the SMI from the dropdown options to make sure the Benchmark Index cannot be manually deselected.
 
-    stocks = st.multiselect( # This creates the dropdown to pick certain stocks.
+    tickers = st.multiselect( # This creates the dropdown to pick certain stocks.
         "Select Stocks", 
-        options=selectable_stocks, 
+        options=selectable_tickers, 
         format_func=lambda x: f"{smi_companies[x]} ({x})", # We include a lambda function so that the full company names are shown instead of the ticker symbols.
         default=["NESN.SW", "ROG.SW", "UBSG.SW"]  # By default, the stocks of Nestle, Roche and UBS Group will be selected.
     )
@@ -130,13 +130,13 @@ with st.sidebar: # We use st.sidebar to place everything inside this block on th
     weights = {} # We open up an empty dictionary to store the weights the user enters
     
     # Only show weights input if tickers are selected
-    if stocks:
+    if tickers:
         with st.expander("Assign Weights (%)", expanded=True): # We open an expander to assign the weights, it is expanded by default.
             st.write("Assign percentage weights. Must sum to 100%.") # Descripion for the user.
             
-            default_weight = round(100.0 / len(stocks), 2) # We set all weights of the selected stocks equal by default
+            default_weight = round(100.0 / len(tickers), 2) # We set all weights of the selected stocks equal by default
             
-            for t in stocks:
+            for t in tickers:
                 name = smi_companies[t] # This makes sure we use the company name, not the ticker symbol.
                 # Input for Percentage (0-100)
                 weights[t] = st.number_input(f"{name} (%)", min_value=0.0, max_value=100.0, value=default_weight, step=1.0) # For any stock, a weight between 0% and 100% can be chosen.
@@ -176,16 +176,16 @@ try:
     # 1. PREPARE TICKER LIST
     # We take the user's selection AND forcefully add the SMI Index.
     # set() removes duplicates just in case.
-    stocks_to_load = list(set(stocks + ["^SSMI"]))
+    tickers_to_load = list(set(tickers + ["^SSMI"]))
 
     # 2. CALL THE FUNCTION
-    stock_df = load_data(stocks_to_load, start_date, end_date)
+    stock_df = load_data(tickers_to_load, start_date, end_date)
     
     # 3. CHECK IF DATA IS EMPTY
     if stock_df.empty:
         st.warning("No data found. Please check your date range or tickers.")
     else:
-        st.success(f"Data loaded successfully for {len(stocks_to_load)} tickers (including Benchmark)!")
+        st.success(f"Data loaded successfully for {len(tickers_to_load)} tickers (including Benchmark)!")
         
         # Raw Data Preview (Hidden by default)
         with st.expander("📄 View Raw Data Preview"):
@@ -202,18 +202,18 @@ try:
         current_total = sum(weights.values())
         
         # Logic: Only calculate portfolio if tickers selected AND weights sum to 100
-        if stocks and not cleaned_df.empty and abs(current_total - 100.0) <= 0.1:
+        if tickers and not cleaned_df.empty and abs(current_total - 100.0) <= 0.1:
             valid_portfolio = True
             
             # 1. Isolate the selected stocks (exclude benchmark)
-            selected_stocks = cleaned_df[stocks]
+            selected_tickers = cleaned_df[tickers]
             
             # 2. Calculate Daily Returns for individual stocks
-            daily_returns = selected_stocks.pct_change()
+            daily_returns = selected_tickers.pct_change()
             
             # 3. Convert Percentages (50) to Decimals (0.5)
             # We iterate through the list 'tickers' to ensure order matches columns
-            final_weights = [weights[t] / 100.0 for t in stocks]
+            final_weights = [weights[t] / 100.0 for t in tickers]
             
             # 4. Calculate "My Portfolio" Returns
             # Dot Product: returns matrix dot weights vector
@@ -228,7 +228,7 @@ try:
             
             # REMOVED: Equal-Weighted Portfolio logic as requested.
 
-        elif stocks and abs(current_total - 100.0) > 0.1:
+        elif tickers and abs(current_total - 100.0) > 0.1:
             st.warning("⚠️ 'My Portfolio' not calculated: Weights do not sum to 100%.")
 
         # -----------------------------------------------------------------------------
@@ -395,7 +395,7 @@ try:
         """)
         
         # 1. User Selects a Stock
-        ml_opts = [t for t in stocks if t in cleaned_df.columns]
+        ml_opts = [t for t in tickers if t in cleaned_df.columns]
         ml_ticker = st.selectbox("Select Stock to Predict", ml_opts, format_func=lambda x: smi_companies.get(x, x))
         
         if ml_ticker:

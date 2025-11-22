@@ -141,6 +141,29 @@ with st.sidebar:
     with col2:
         end_date = st.date_input("End Date", value=pd.to_datetime("today"))
 
+    # -------------------------------------------------------------------------
+    # SNIPPET 6: PORTFOLIO WEIGHTS (New Sidebar Section)
+    # -------------------------------------------------------------------------
+    st.markdown("---")
+    st.header("⚖️ Portfolio Builder")
+    
+    # Dictionary to store the weights user enters
+    weights = {}
+    
+    # Only show weights input if tickers are selected
+    if tickers:
+        with st.expander("Assign Weights", expanded=False):
+            for t in tickers:
+                # We use the full name for the label
+                name = smi_companies[t]
+                # Default weight: Equal distribution (e.g., if 3 stocks, 1.0 each)
+                # We will normalize them later, so the absolute number doesn't matter.
+                weights[t] = st.number_input(f"{name}", min_value=0.0, value=1.0, step=0.1)
+            
+            # Show 'Equal Weighted' Option Checkbox
+            # If checked, we ignore the numbers above and use equal weights.
+            # (Actually, let's just calculate BOTH automatically for comparison!)
+
 # -----------------------------------------------------------------------------
 # SNIPPET 3: LOADING DATA
 # -----------------------------------------------------------------------------
@@ -166,7 +189,6 @@ def load_data(ticker_list, start, end):
 try:
     # 1. PREPARE TICKER LIST
     # We take the user's selection AND forcefully add the SMI Index.
-    # set() removes duplicates just in case.
     tickers_to_load = list(set(tickers + ["^SSMI"]))
 
     # 2. CALL THE FUNCTION
@@ -183,12 +205,56 @@ try:
              st.dataframe(stock_df.head())
 
         # -----------------------------------------------------------------------------
+        # DATA PRE-PROCESSING (Updated for Portfolio)
+        # -----------------------------------------------------------------------------
+        # Drop rows with missing values to ensure fair comparison (same start date)
+        cleaned_df = stock_df.dropna()
+        
+        # CALCULATE PORTFOLIO
+        # We only calculate if the user has selected tickers (not just the Benchmark)
+        if tickers and not cleaned_df.empty:
+            # 1. Isolate the selected stocks (exclude benchmark)
+            selected_stocks = cleaned_df[tickers]
+            
+            # 2. Calculate Daily Returns for individual stocks
+            daily_returns = selected_stocks.pct_change()
+            
+            # 3. Normalize Weights
+            # Even if user enters 50 and 50, sum is 100. We need 0.5 and 0.5.
+            total_weight = sum(weights.values())
+            if total_weight == 0:
+                # Avoid division by zero
+                norm_weights = {t: 1.0/len(tickers) for t in tickers}
+            else:
+                norm_weights = {t: w/total_weight for t in tickers.keys() for w in [weights[t]]}
+            
+            # 4. Calculate "My Portfolio" Returns
+            # Multiply each stock's return by its weight, then sum the row.
+            # We align the weights list to the columns order
+            weight_list = [norm_weights[t] for t in selected_stocks.columns]
+            portfolio_ret = (daily_returns * weight_list).sum(axis=1)
+            
+            # 5. Construct "My Portfolio" Price Series (Starting at 100)
+            # We assume start price is 100 to match the chart normalization
+            my_portfolio_price = (1 + portfolio_ret).cumprod() * 100
+            # Fix first NaN value (Day 1 is 100)
+            my_portfolio_price.iloc[0] = 100
+            
+            # 6. Add to the Main DataFrame!
+            # This is the magic step. By adding it here, all downstream charts use it automatically.
+            cleaned_df["💼 My Portfolio"] = my_portfolio_price
+            
+            # 7. Optional: Add an Equal-Weighted Portfolio for comparison
+            equal_weights = [1.0/len(tickers)] * len(tickers)
+            equal_ret = (daily_returns * equal_weights).sum(axis=1)
+            equal_portfolio_price = (1 + equal_ret).cumprod() * 100
+            equal_portfolio_price.iloc[0] = 100
+            cleaned_df["⚖️ Equal Weighted"] = equal_portfolio_price
+
+        # -----------------------------------------------------------------------------
         # SNIPPET 4: DYNAMIC KPI VISUALIZER
         # -----------------------------------------------------------------------------
         st.subheader("📊 KPI Visualizer over Time")
-        
-        # Drop rows with missing values to ensure fair comparison (same start date)
-        cleaned_df = stock_df.dropna()
         
         if not cleaned_df.empty:
             # Metric Selection Dropdown
@@ -210,6 +276,8 @@ try:
             
             # Logic for each Metric
             if selected_metric == "Cumulative Return (Indexed to 100)":
+                # Use the data as is (since we already have prices/indices)
+                # We re-normalize just to be safe
                 plot_data = cleaned_df / cleaned_df.iloc[0] * 100
                 
             elif selected_metric == "Annualized Return (30-Day Rolling)":
@@ -239,7 +307,10 @@ try:
                 plot_data = returns.rolling(window=window).quantile(0.05)
 
             # Rename columns and plot
-            plot_data = plot_data.rename(columns=smi_companies)
+            # We use the dictionary for tickers, but keep "My Portfolio" as is
+            # The .get(x, x) method returns the name if found, otherwise keeps the original text
+            plot_data = plot_data.rename(columns=lambda x: smi_companies.get(x, x))
+            
             st.line_chart(plot_data)
             
         else:
@@ -252,14 +323,15 @@ try:
         
         # 1. Call helper function
         metrics_df = calculate_metrics(cleaned_df)
-        metrics_df = metrics_df.rename(index=smi_companies)
+        
+        # 2. Rename the Index
+        metrics_df = metrics_df.rename(index=lambda x: smi_companies.get(x, x))
 
-        # 2. SCATTER PLOT CONFIGURATION
+        # 3. SCATTER PLOT CONFIGURATION
         metrics_df.index.name = "Company"
         scatter_data = metrics_df.reset_index()
         
         # Map the internal column names to nice labels for the chart
-        # We replace dots with spaces or underscores to avoid Altair errors
         col_mapping = {
             'Ann. Return': 'Annualized Return',
             'Cumulative Return': 'Cumulative Return',
@@ -270,26 +342,20 @@ try:
             'Value at Risk (95%)': 'Value at Risk 95%'
         }
         
-        # Rename the columns in our data to match the nice labels
         scatter_data = scatter_data.rename(columns=col_mapping)
         
         # 3. Create Dropdowns for X and Y Axes
         st.markdown("##### Compare Metrics (Scatter Plot)")
         col_x, col_y = st.columns(2)
         
-        # Get the list of available options (the nice labels)
         chart_opts = list(col_mapping.values())
         
         with col_x:
-            # Default X: Volatility
             x_axis = st.selectbox("X-Axis", chart_opts, index=chart_opts.index('Annualized Volatility'))
         with col_y:
-            # Default Y: Return
             y_axis = st.selectbox("Y-Axis", chart_opts, index=chart_opts.index('Annualized Return'))
             
         # 4. Dynamic Formatting
-        # If the user selects a Ratio (Sharpe/Sortino), display as number (2.50).
-        # Otherwise display as percentage (15%).
         x_format = ".2f" if "Ratio" in x_axis else "%"
         y_format = ".2f" if "Ratio" in y_axis else "%"
         
@@ -298,7 +364,6 @@ try:
             x=alt.X(x_axis, title=x_axis, axis=alt.Axis(format=x_format)),
             y=alt.Y(y_axis, title=y_axis, axis=alt.Axis(format=y_format)),
             color='Company',
-            # Tooltip will show all metrics for easy inspection
             tooltip=['Company'] + chart_opts
         ).interactive() 
         

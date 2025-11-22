@@ -8,12 +8,50 @@
 import streamlit as st
 import pandas as pd
 import yfinance as yf
+import numpy as np # Needed for math calculations (sqrt, etc.)
 
 # This must be the first Streamlit command. It sets up the page title and layout.
 st.set_page_config(page_title="Stock Comparator", layout="wide")
 
 # Main title of the application
 st.title("📈 Stock & Portfolio Comparator")
+
+# -----------------------------------------------------------------------------
+# HELPER FUNCTIONS (New Section)
+# -----------------------------------------------------------------------------
+def calculate_metrics(df):
+    """
+    Takes a DataFrame of Stock Prices and calculates:
+    - Annualized Return
+    - Annualized Volatility
+    - Sharpe Ratio
+    - Max Drawdown
+    """
+    # 1. Calculate Daily Returns (Percentage change from previous day)
+    returns = df.pct_change().dropna()
+    
+    # 2. Calculate Metrics
+    # We assume 252 trading days in a year for annualization
+    summary = pd.DataFrame(index=df.columns)
+    
+    # Annualized Return: Average daily return * 252 days
+    # (Simple interest approximation for readability)
+    summary['Ann. Return'] = returns.mean() * 252
+    
+    # Annualized Volatility: Standard deviation of daily returns * Square root of 252
+    summary['Ann. Volatility'] = returns.std() * np.sqrt(252)
+    
+    # Sharpe Ratio: Return / Volatility (assuming 0% Risk Free Rate for simplicity)
+    summary['Sharpe Ratio'] = summary['Ann. Return'] / summary['Ann. Volatility']
+    
+    # Max Drawdown: The worst drop from a peak
+    # We calculate the running maximum, then how far the current price is below that peak
+    cumulative_returns = (1 + returns).cumprod()
+    running_max = cumulative_returns.cummax()
+    drawdown = (cumulative_returns / running_max) - 1
+    summary['Max Drawdown'] = drawdown.min()
+    
+    return summary
 
 # -----------------------------------------------------------------------------
 # SNIPPET 2: SIDEBAR CONTROLS
@@ -148,6 +186,27 @@ try:
             st.line_chart(normalized_df)
         else:
             st.info("Not enough shared data points to plot a comparison. Try adjusting dates.")
+
+        # -----------------------------------------------------------------------------
+        # SNIPPET 5: CALCULATE RISK & RETURN METRICS
+        # -----------------------------------------------------------------------------
+        st.subheader("📉 Risk & Return Metrics")
+        
+        # 1. Call our new helper function
+        metrics_df = calculate_metrics(cleaned_df)
+        
+        # 2. Format the numbers for display
+        # We want percentages (e.g., 0.12 -> "12.00%") and 2 decimal places.
+        # .style.format() is a pandas trick to make tables look pretty without changing the data.
+        formatted_metrics = metrics_df.style.format({
+            'Ann. Return': '{:.2%}',
+            'Ann. Volatility': '{:.2%}',
+            'Sharpe Ratio': '{:.2f}',
+            'Max Drawdown': '{:.2%}'
+        })
+        
+        # 3. Display the table
+        st.dataframe(formatted_metrics)
 
 except Exception as e:
     # st.error shows a red error box if something crashes

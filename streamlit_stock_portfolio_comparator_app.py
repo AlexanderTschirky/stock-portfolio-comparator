@@ -159,10 +159,6 @@ with st.sidebar:
                 # Default weight: Equal distribution (e.g., if 3 stocks, 1.0 each)
                 # We will normalize them later, so the absolute number doesn't matter.
                 weights[t] = st.number_input(f"{name}", min_value=0.0, value=1.0, step=0.1)
-            
-            # Show 'Equal Weighted' Option Checkbox
-            # If checked, we ignore the numbers above and use equal weights.
-            # (Actually, let's just calculate BOTH automatically for comparison!)
 
 # -----------------------------------------------------------------------------
 # SNIPPET 3: LOADING DATA
@@ -189,6 +185,7 @@ def load_data(ticker_list, start, end):
 try:
     # 1. PREPARE TICKER LIST
     # We take the user's selection AND forcefully add the SMI Index.
+    # set() removes duplicates just in case.
     tickers_to_load = list(set(tickers + ["^SSMI"]))
 
     # 2. CALL THE FUNCTION
@@ -205,7 +202,7 @@ try:
              st.dataframe(stock_df.head())
 
         # -----------------------------------------------------------------------------
-        # DATA PRE-PROCESSING (Updated for Portfolio)
+        # DATA PRE-PROCESSING & PORTFOLIO CALCULATION
         # -----------------------------------------------------------------------------
         # Drop rows with missing values to ensure fair comparison (same start date)
         cleaned_df = stock_df.dropna()
@@ -226,7 +223,8 @@ try:
                 # Avoid division by zero
                 norm_weights = {t: 1.0/len(tickers) for t in tickers}
             else:
-                norm_weights = {t: w/total_weight for t in tickers.keys() for w in [weights[t]]}
+                # FIX: Removed .keys() because 'tickers' is already a list
+                norm_weights = {t: weights[t]/total_weight for t in tickers}
             
             # 4. Calculate "My Portfolio" Returns
             # Multiply each stock's return by its weight, then sum the row.
@@ -281,29 +279,38 @@ try:
                 plot_data = cleaned_df / cleaned_df.iloc[0] * 100
                 
             elif selected_metric == "Annualized Return (30-Day Rolling)":
+                # Rolling Average Return * 252
                 plot_data = returns.rolling(window=window).mean() * 252
             
             elif selected_metric == "Volatility (30-Day Rolling)":
+                # Rolling Std Dev * sqrt(252)
                 plot_data = returns.rolling(window=window).std() * np.sqrt(252)
                 
             elif selected_metric == "Sharpe Ratio (30-Day Rolling)":
+                # Rolling Mean / Rolling Std over 30 days
                 rolling_return = returns.rolling(window=window).mean() * 252
                 rolling_vol = returns.rolling(window=window).std() * np.sqrt(252)
                 plot_data = rolling_return / rolling_vol
             
             elif selected_metric == "Sortino Ratio (30-Day Rolling)":
+                # Rolling Return / Rolling Downside Volatility
+                # 1. Isolate negative returns (keep positives as NaN)
                 downside = returns.copy()
                 downside[downside > 0] = np.nan
+                # 2. Calculate Rolling Std of these negative returns
+                # (Pandas rolling.std() ignores NaNs by default, which is what we want)
                 rolling_downside_vol = downside.rolling(window=window).std() * np.sqrt(252)
                 rolling_return = returns.rolling(window=window).mean() * 252
                 plot_data = rolling_return / rolling_downside_vol
                 
             elif selected_metric == "Drawdown (Historical)":
+                # Historical Drawdown from Running Max
                 cumulative_rets = (1 + returns).cumprod()
                 running_max = cumulative_rets.cummax()
                 plot_data = (cumulative_rets / running_max) - 1
                 
             elif selected_metric == "Value at Risk 95% (30-Day Rolling)":
+                # Rolling 5th Percentile (0.05 quantile)
                 plot_data = returns.rolling(window=window).quantile(0.05)
 
             # Rename columns and plot
@@ -324,14 +331,18 @@ try:
         # 1. Call helper function
         metrics_df = calculate_metrics(cleaned_df)
         
-        # 2. Rename the Index
+        # 2. Rename the Index (Rows) from Tickers to Full Names
+        # We use .get() so if "My Portfolio" isn't in the dict, it just stays "My Portfolio"
         metrics_df = metrics_df.rename(index=lambda x: smi_companies.get(x, x))
 
         # 3. SCATTER PLOT CONFIGURATION
+        # Prepare data for Altair: Reset index so 'Company' is a column, not an index.
+        # Explicitly name the index 'Company' to avoid "None" or "Ticker" errors.
         metrics_df.index.name = "Company"
         scatter_data = metrics_df.reset_index()
         
         # Map the internal column names to nice labels for the chart
+        # We replace dots with spaces or underscores to avoid Altair errors
         col_mapping = {
             'Ann. Return': 'Annualized Return',
             'Cumulative Return': 'Cumulative Return',
@@ -342,20 +353,26 @@ try:
             'Value at Risk (95%)': 'Value at Risk 95%'
         }
         
+        # Rename the columns in our data to match the nice labels
         scatter_data = scatter_data.rename(columns=col_mapping)
         
         # 3. Create Dropdowns for X and Y Axes
         st.markdown("##### Compare Metrics (Scatter Plot)")
         col_x, col_y = st.columns(2)
         
+        # Get the list of available options (the nice labels)
         chart_opts = list(col_mapping.values())
         
         with col_x:
+            # Default X: Volatility
             x_axis = st.selectbox("X-Axis", chart_opts, index=chart_opts.index('Annualized Volatility'))
         with col_y:
+            # Default Y: Return
             y_axis = st.selectbox("Y-Axis", chart_opts, index=chart_opts.index('Annualized Return'))
             
         # 4. Dynamic Formatting
+        # If the user selects a Ratio (Sharpe/Sortino), display as number (2.50).
+        # Otherwise display as percentage (15%).
         x_format = ".2f" if "Ratio" in x_axis else "%"
         y_format = ".2f" if "Ratio" in y_axis else "%"
         
@@ -364,12 +381,14 @@ try:
             x=alt.X(x_axis, title=x_axis, axis=alt.Axis(format=x_format)),
             y=alt.Y(y_axis, title=y_axis, axis=alt.Axis(format=y_format)),
             color='Company',
+            # Tooltip will show all metrics for easy inspection
             tooltip=['Company'] + chart_opts
         ).interactive() 
         
         st.altair_chart(chart, use_container_width=True)
         
         # 6. Format and Display Summary Table
+        # We use specific formatting for percentages and decimals
         formatted_metrics = metrics_df.style.format({
             'Ann. Return': '{:.2%}',
             'Cumulative Return': '{:.2%}',
@@ -384,4 +403,5 @@ try:
         st.dataframe(formatted_metrics)
 
 except Exception as e:
+    # st.error shows a red error box if something crashes
     st.error(f"An error occurred: {e}")

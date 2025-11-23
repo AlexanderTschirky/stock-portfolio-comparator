@@ -191,7 +191,17 @@ try:
         with st.expander("📄 View Data Preview"): # We show a preview of the loaded data, it is hidden by default. The data can also be downloaded.
              preview_df = stock_df.rename(columns=lambda x: smi_companies.get(x, x))# The lambda function makes sure that the full company names are shown instead of the ticker symbols.
              st.dataframe(preview_df.tail())
+
+        csv_data = preview_df.to_csv().encode('utf-8')
              
+        st.download_button(
+            label="⬇️ Download Raw Data (CSV)",
+            data=csv_data,
+            file_name="stock_data.csv",
+            mime="text/csv",
+            help="Click to download the full historical price data as a CSV file."
+        )
+        
         # -----------------------------------------------------------------------------
         # DATA PRE-PROCESSING & PORTFOLIO CALCULATION (Updated)
         # -----------------------------------------------------------------------------

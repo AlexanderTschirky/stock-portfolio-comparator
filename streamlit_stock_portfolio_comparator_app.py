@@ -152,21 +152,19 @@ with st.sidebar: # We use st.sidebar to place everything inside this block on th
                 st.success("✅ Portfolio Ready") # If the total of the picked weights is good, this message occurs.
 
 # -----------------------------------------------------------------------------
-# SNIPPET 3: LOADING DATA
+# LOADING DATA
 # -----------------------------------------------------------------------------
 # This function downloads the data. 
-# @st.cache_data prevents redownloading on every interaction.
-@st.cache_data
-def load_data(ticker_list, start, end):
+@st.cache_data # This is a decorator provided by the Streamlit library, it saves the data it loaded once in the memory. This saves time as the data is not loaded again.
+def load_data(ticker_list, start, end): # We define a function to download the data selected at the sidebar.
     if not ticker_list:
-        return pd.DataFrame()
+        return pd.DataFrame() # If the list is empty, nothing is downloaded
     
-    # yfinance download with auto_adjust=True to handle splits/dividends.
-    data = yf.download(ticker_list, start=start, end=end, auto_adjust=True)
+    data = yf.download(ticker_list, start=start, end=end, auto_adjust=True) # We download the data from yfinance. We use auto_adjust=True tu handle splits/dividends.
     
     # Formatting Fix for Single Ticker vs Multiple Tickers
     if len(ticker_list) == 1:
-        return data['Close'].to_frame(name=ticker_list[0])
+        return data['Close'].to_frame(name=ticker_list[0]) # We need this logic so that yfinance defines a single-stock-ticker the same as a multi-stock table.
     
     return data['Close']
 
@@ -175,23 +173,25 @@ def load_data(ticker_list, start, end):
 # -----------------------------------------------------------------------------
 try:
     # 1. PREPARE TICKER LIST
-    # We take the user's selection AND forcefully add the SMI Index.
-    # set() removes duplicates just in case.
-    tickers_to_load = list(set(tickers + ["^SSMI"]))
+    tickers_to_load = list(set(tickers + ["^SSMI"])) # The tickers that are selected are loaded. The SMI is always loaded.
 
     # 2. CALL THE FUNCTION
-    stock_df = load_data(tickers_to_load, start_date, end_date)
+    stock_df = load_data(tickers_to_load, start_date, end_date) # We create the DataFrame for the further analysis.
     
     # 3. CHECK IF DATA IS EMPTY
     if stock_df.empty:
-        st.warning("No data found. Please check your date range or tickers.")
+        st.warning("No data found. Please check your date range.") # If the DataFrame is completely empty, a warning is shown. This should never be the case as the SMI is always loaded.
     else:
-        st.success(f"Data loaded successfully for {len(tickers_to_load)} tickers (including Benchmark)!")
+        if not tickers:
+            st.info("Showing Benchmark (SMI) only. Select stocks in the sidebar to compare.") # If only the SMI is loaded, it shows this message.
+        else:
+            st.success(f"Data loaded successfully for {len(tickers_to_load)} tickers (including Benchmark)!") # If any stocks have been successfully selected, this message shows up.
         
         # Raw Data Preview (Hidden by default)
-        with st.expander("📄 View Raw Data Preview"):
-             st.dataframe(stock_df.head())
-
+        with st.expander("📄 View Data Preview"): # We show a preview of the loaded data, it is hidden by default. The data can also be downloaded.
+             preview_df = stock_df.rename(columns=lambda x: smi_companies.get(x, x))# The lambda function makes sure that the full company names are shown instead of the ticker symbols.
+             st.dataframe(preview_df.tail())
+             
         # -----------------------------------------------------------------------------
         # DATA PRE-PROCESSING & PORTFOLIO CALCULATION (Updated)
         # -----------------------------------------------------------------------------

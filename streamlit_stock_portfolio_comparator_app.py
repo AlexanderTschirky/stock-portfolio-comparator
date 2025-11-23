@@ -188,68 +188,54 @@ try:
             st.success(f"Data loaded successfully for {len(tickers_to_load)} tickers (including Benchmark)!") # If any stocks have been successfully selected, this message shows up.
         
         # Raw Data Preview (Hidden by default)
-        with st.expander("📄 View Data Preview"): # We show a preview of the loaded data, it is hidden by default. The data can also be downloaded.
-             preview_df = stock_df.rename(columns=lambda x: smi_companies.get(x, x))# The lambda function makes sure that the full company names are shown instead of the ticker symbols.
-             st.dataframe(preview_df.tail())
-
-        csv_data = preview_df.to_csv().encode('utf-8')
+        with st.expander("📄 View Last 21 Trading Days"): # We show a preview of the loaded data, it is hidden by default. The data can also be downloaded.
+             preview_df = stock_df.rename(columns=lambda x: smi_companies.get(x, x)) # The lambda function makes sure that the full company names are shown instead of the ticker symbols.
+             st.dataframe(preview_df.tail(21))
              
-        st.download_button(
-            label="⬇️ Download Raw Data (CSV)",
-            data=csv_data,
-            file_name="stock_data.csv",
+        csv_data = preview_df.to_csv().encode('utf-8') # We encode the data to a CSV-string to make it ready for the export
+             
+        st.download_button( # We create a button which allows to download the data
+            label="⬇️ Download Raw Price Data (CSV)", # This is the label of the download button
+            data=csv_data, 
+            file_name="stock_price_data.csv",
             mime="text/csv",
             help="Click to download the full historical price data as a CSV file."
         )
-        
+             
         # -----------------------------------------------------------------------------
-        # DATA PRE-PROCESSING & PORTFOLIO CALCULATION (Updated)
+        # DATA PRE-PROCESSING & PORTFOLIO CALCULATION
         # -----------------------------------------------------------------------------
-        # Drop rows with missing values to ensure fair comparison (same start date)
-        cleaned_df = stock_df.dropna()
+        cleaned_df = stock_df.dropna() # We drop rows with missing data to ensure a fair comparison
         
-        # CHECK if user has valid portfolio configuration
-        valid_portfolio = False
+        valid_portfolio = False # We set the portfolio as unvalid by default, unless its weight's sum up to 100%
         current_total = sum(weights.values())
         
-        # Logic: Only calculate portfolio if tickers selected AND weights sum to 100
-        if tickers and not cleaned_df.empty and abs(current_total - 100.0) <= 0.1:
-            valid_portfolio = True
+        if tickers and not cleaned_df.empty and abs(current_total - 100.0) <= 0.1: # Those are the criteria for the portfolio to be valid
+            valid_portfolio = True # If the criteria are fulfilled, the portfolio is valid
+    
+            selected_tickers = cleaned_df[tickers] # We exclude the benchmark from the selected stocks
             
-            # 1. Isolate the selected stocks (exclude benchmark)
-            selected_tickers = cleaned_df[tickers]
+            daily_returns = selected_tickers.pct_change() # We calculate the daily returns for the individual stocks seleted
             
-            # 2. Calculate Daily Returns for individual stocks
-            daily_returns = selected_tickers.pct_change()
+            final_weights = [weights[t] / 100.0 for t in tickers] # We divide the chosen weights by 100 to get the percentages
             
-            # 3. Convert Percentages (50) to Decimals (0.5)
-            # We iterate through the list 'tickers' to ensure order matches columns
-            final_weights = [weights[t] / 100.0 for t in tickers]
+            portfolio_ret = daily_returns.dot(final_weights) # We calculate the portfolio return. The dot-product weighs the single stock returns
             
-            # 4. Calculate "My Portfolio" Returns
-            # Dot Product: returns matrix dot weights vector
-            portfolio_ret = daily_returns.dot(final_weights)
+            my_portfolio_price = (1 + portfolio_ret).cumprod() * 100 # We construct the portfolio price series
+            my_portfolio_price.iloc[0] = 100 # We norm it so that the start is at 100
             
-            # 5. Construct "My Portfolio" Price Series (Starting at 100)
-            my_portfolio_price = (1 + portfolio_ret).cumprod() * 100
-            my_portfolio_price.iloc[0] = 100
-            
-            # 6. Add to the Main DataFrame
-            cleaned_df["💼 My Portfolio"] = my_portfolio_price
-            
-            # REMOVED: Equal-Weighted Portfolio logic as requested.
+            cleaned_df["💼 My Portfolio"] = my_portfolio_price # We add the portfolio to the main DataFrame
 
         elif tickers and abs(current_total - 100.0) > 0.1:
-            st.warning("⚠️ 'My Portfolio' not calculated: Weights do not sum to 100%.")
+            st.warning("⚠️ 'My Portfolio' not calculated: Weights do not sum to 100%.") # If the portfolio weights do not sum to 100, this warning is shown
 
         # -----------------------------------------------------------------------------
-        # SNIPPET 4: DYNAMIC KPI VISUALIZER
+        # DYNAMIC KPI VISUALIZER
         # -----------------------------------------------------------------------------
         st.subheader("📊 KPI Visualizer over Time")
         
         if not cleaned_df.empty:
-            # Metric Selection Dropdown
-            metric_options = [
+            metric_options = [ # We create a dropdown-menu where users can compare the chosen stocks according to the 7 KPI's we defined
                 "Cumulative Return (Indexed to 100)",
                 "Annualized Return (30-Day Rolling)",
                 "Volatility (30-Day Rolling)",
@@ -261,76 +247,63 @@ try:
             
             selected_metric = st.selectbox("Select Metric to Plot", metric_options)
             
-            # Calculate Daily Returns (needed for most metrics)
-            returns = cleaned_df.pct_change().dropna()
-            window = 30 # Window size for rolling calculations
+            returns = cleaned_df.pct_change().dropna() # We calculate the Daily Returns, as we need it for the other KPI's
+            window = 30 # For the rolling calculations, we set a window size of 30 days
             
-            # Logic for each Metric
+            # We set up a logic that calculates the time series for the chosen KPI. The calculations are the same as for the calculate_KPI function constructed earlier.
+            # The difference is that we now need a time series plot instead of only one value for each stock and KPI.
             if selected_metric == "Cumulative Return (Indexed to 100)":
-                # Use the data as is (since we already have prices/indices)
-                # We re-normalize just to be safe
                 plot_data = cleaned_df / cleaned_df.iloc[0] * 100
                 
             elif selected_metric == "Annualized Return (30-Day Rolling)":
-                # Rolling Average Return * 252
                 plot_data = returns.rolling(window=window).mean() * 252
             
             elif selected_metric == "Volatility (30-Day Rolling)":
-                # Rolling Std Dev * sqrt(252)
                 plot_data = returns.rolling(window=window).std() * np.sqrt(252)
                 
             elif selected_metric == "Sharpe Ratio (30-Day Rolling)":
-                # Rolling Mean / Rolling Std over 30 days
                 rolling_return = returns.rolling(window=window).mean() * 252
                 rolling_vol = returns.rolling(window=window).std() * np.sqrt(252)
                 plot_data = rolling_return / rolling_vol
             
             elif selected_metric == "Sortino Ratio (30-Day Rolling)":
-                # Rolling Return / Rolling Downside Volatility
-                # 1. Isolate negative returns (keep positives as NaN)
                 downside = returns.copy()
                 downside[downside > 0] = np.nan
-                # 2. Calculate Rolling Std of these negative returns
-                # (Pandas rolling.std() ignores NaNs by default, which is what we want)
                 rolling_downside_vol = downside.rolling(window=window).std() * np.sqrt(252)
                 rolling_return = returns.rolling(window=window).mean() * 252
                 plot_data = rolling_return / rolling_downside_vol
                 
             elif selected_metric == "Drawdown (Historical)":
-                # Historical Drawdown from Running Max
                 cumulative_rets = (1 + returns).cumprod()
                 running_max = cumulative_rets.cummax()
                 plot_data = (cumulative_rets / running_max) - 1
                 
             elif selected_metric == "Value at Risk 95% (30-Day Rolling)":
-                # Rolling 5th Percentile (0.05 quantile)
                 plot_data = returns.rolling(window=window).quantile(0.05)
 
-            # Rename columns and plot
-            # We use the dictionary for tickers, but keep "My Portfolio" as is
-            # The .get(x, x) method returns the name if found, otherwise keeps the original text
-            plot_data = plot_data.rename(columns=lambda x: smi_companies.get(x, x))
+
+            plot_data = plot_data.rename(columns=lambda x: smi_companies.get(x, x)) # The lambda function makes sure that the full company names are shown instead of the ticker symbols.
             
-            st.line_chart(plot_data)
+            st.line_chart(plot_data) # We create a line chart that shows the time series of the selected stocks and KPI.
             
         else:
-            st.info("Not enough shared data points to plot a comparison. Try adjusting dates.")
+            st.info("Not enough shared data points to plot a comparison. Try adjusting dates.") # This comes up if there is no data in the cleaned_df.
 
         # -----------------------------------------------------------------------------
-        # SNIPPET 5: CALCULATE RISK & RETURN METRICS
+        # CALCULATE RISK & RETURN METRICS
         # -----------------------------------------------------------------------------
+        # Our goal here is to create a scatterplot where the user can compare two different metrices to each other. This will allow to make a risk-return-analysis.
         st.subheader("📉 Risk & Return Analysis")
         
         # 1. Call helper function
-        metrics_df = calculate_KPI(cleaned_df)
+        metrics_df = calculate_KPI(cleaned_df) # We call the helper function 
         
-        # 2. Rename the Index (Rows) from Tickers to Full Names
-        metrics_df = metrics_df.rename(index=lambda x: smi_companies.get(x, x))
+        metrics_df = metrics_df.rename(index=lambda x: smi_companies.get(x, x)) # The lambda function makes sure that the full company names are shown instead of the ticker symbols.
 
         # 3. SCATTER PLOT CONFIGURATION
         # Prepare data for Altair: Reset index so 'Company' is a column, not an index.
         # Explicitly name the index 'Company' to avoid "None" or "Ticker" errors.
-        metrics_df.index.name = "Company"
+        metrics_df.index.name = "Stock"
         scatter_data = metrics_df.reset_index()
         
         # Map the internal column names to nice labels for the chart
@@ -402,7 +375,7 @@ try:
         
         st.write("""
         This model predicts the **Exact Volatility** (Absolute Daily Return) for the next trading day.
-        It uses the past 5 days of volatility to learn patterns using a Random Forest Regressor.
+        It uses the past 21 days of volatility to learn patterns using a Random Forest Regressor.
         """)
         
         # 1. User Selects a Stock

@@ -302,8 +302,7 @@ try:
         metrics_df.index.name = "Stock" # We name the index "Stock".
         scatter_data = metrics_df.reset_index() # We reset the index so that "Stock" is a column, not an index.
         
-        # Map the internal column names to nice labels for the chart
-        # We replace dots with spaces or underscores to avoid Altair errors
+        # We map the internal column names to labels for the chart
         col_mapping = {
             'Ann. Return': 'Annualized Return',
             'Cumulative Return': 'Cumulative Return',
@@ -314,42 +313,35 @@ try:
             'Value at Risk (95%)': 'Value at Risk 95%'
         }
         
-        # Rename the columns in our data to match the nice labels
-        scatter_data = scatter_data.rename(columns=col_mapping)
+        scatter_data = scatter_data.rename(columns=col_mapping) # We rename the columns in our data to match the new labels
+
+        st.markdown("##### Compare Metrics (Scatter Plot)") # This is the title of the scatter plot.
+        col_x, col_y = st.columns(2) # We create the two columns to pick the values for the x and y axes.
         
-        # 3. Create Dropdowns for X and Y Axes
-        st.markdown("##### Compare Metrics (Scatter Plot)")
-        col_x, col_y = st.columns(2)
+        chart_opts = list(col_mapping.values()) # We create the list of the available metrics to get the chart options afterwards.
         
-        # Get the list of available options (the nice labels)
-        chart_opts = list(col_mapping.values())
-        
+        # We create the dropdown menu.
+        # We set the Annualized Volatility and Anualized Return as the default metrics
         with col_x:
-            # Default X: Volatility
             x_axis = st.selectbox("X-Axis", chart_opts, index=chart_opts.index('Annualized Volatility'))
         with col_y:
-            # Default Y: Return
             y_axis = st.selectbox("Y-Axis", chart_opts, index=chart_opts.index('Annualized Return'))
             
-        # 4. Dynamic Formatting
-        # If the user selects a Ratio (Sharpe/Sortino), display as number (2.50).
-        # Otherwise display as percentage (15%).
+        # We use dynamic formatting so that if the user selects the Sharepe or Sortino ratio, it is displayed as a number. The other metrics are displayed as a percentage.
         x_format = ".2f" if "Ratio" in x_axis else "%"
         y_format = ".2f" if "Ratio" in y_axis else "%"
         
-        # 5. Create Altair Chart
+        # We create the Altair chart.
         chart = alt.Chart(scatter_data).mark_circle(size=100).encode(
             x=alt.X(x_axis, title=x_axis, axis=alt.Axis(format=x_format)),
             y=alt.Y(y_axis, title=y_axis, axis=alt.Axis(format=y_format)),
             color='Stock',
-            # Tooltip will show all metrics for easy inspection
             tooltip=['Stock'] + chart_opts
         ).interactive() 
         
-        st.altair_chart(chart, use_container_width=True)
+        st.altair_chart(chart, use_container_width=True) # We load the chart in streamlit
         
-        # 6. Format and Display Summary Table
-        # We use specific formatting for percentages and decimals
+        # We format the summary table. The numbers are rounded to two decimal places.
         formatted_metrics = metrics_df.style.format({
             'Ann. Return': '{:.2%}',
             'Cumulative Return': '{:.2%}',
@@ -360,23 +352,23 @@ try:
             'Value at Risk (95%)': '{:.2%}'
         })
         
-        st.markdown("##### Detailed Metrics Table")
-        st.dataframe(formatted_metrics)
+        st.markdown("##### Detailed Metrics Table") # This is the title of the table.
+        st.dataframe(formatted_metrics) # We create the table with the KPI's for the selected stocks.
 
         # -----------------------------------------------------------------------------
-        # SNIPPET 7: MACHINE LEARNING (Updated for Regression)
+        # MACHINE LEARNING
         # -----------------------------------------------------------------------------
-        st.markdown("---")
-        st.header("🤖 Machine Learning: Volatility Prediction")
+        st.markdown("---") # We put a line between the metrics table and the ML-part
+        st.header("🤖 Machine Learning: Volatility Prediction") # This is the title of the ML-part
         
         st.write("""
         This model predicts the **Exact Volatility** (Absolute Daily Return) for the next trading day.
         It uses the past 21 days of volatility to learn patterns using a Random Forest Regressor.
-        """)
+        """) # Description of the ML-part.
         
-        # 1. User Selects a Stock
-        ml_opts = [t for t in tickers if t in cleaned_df.columns]
-        ml_ticker = st.selectbox("Select Stock to Predict", ml_opts, format_func=lambda x: smi_companies.get(x, x))
+        # The user has to select a stock for the volatility forecasting
+        ml_opts = list(cleaned_df.columns) # The options to choose from are the selected stocks, aswell as the created portfolio.
+        ml_ticker = st.selectbox("Select Stock to Predict", ml_opts, format_func=lambda x: smi_companies.get(x, x)) # We create a ticker to select the stocks. The lambda function makes sure that the full company names are shown instead of the ticker symbols.
         
         if ml_ticker:
             # 2. Prepare Data
@@ -429,3 +421,4 @@ try:
 except Exception as e:
     # st.error shows a red error box if something crashes
     st.error(f"An error occurred: {e}")
+

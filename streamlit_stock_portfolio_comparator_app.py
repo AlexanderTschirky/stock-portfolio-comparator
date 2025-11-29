@@ -99,6 +99,46 @@ def prepare_regression_data(series, window=21, horizon=1):
     feature_cols = [f'Vol_Lag_{i}' for i in range(1, window + 1)] # This creates a list of the column names we created
     return df[feature_cols], df['Target'] # The function returns two separate tables, one containing the lag-columns, one containing the "Target". 
 
+# Function to fetch market caps and calculate weights
+@st.cache_data(ttl=3600) # Cache for 1 hour
+def get_index_composition(tickers_dict):
+    """
+    Fetches market cap for all tickers in the dictionary and calculates relative weights.
+    """
+    data = []
+    
+    # We need to fetch info for each ticker.
+    # yfinance Tickers object allows fetching metadata efficiently
+    ticker_strings = list(tickers_dict.keys())
+    
+    # We process them in chunks or one by one if the list is small enough
+    # For ~20-30 stocks, we can iterate. Ideally use Tickers object but info fetching can be slow.
+    # To be fast, we will try to use the Tickers object.
+    
+    # Note: Fetching .info for many tickers can be slow. 
+    # For a university project, we will iterate but cache the result.
+    
+    total_market_cap = 0
+    
+    for ticker, name in tickers_dict.items():
+        try:
+            stock = yf.Ticker(ticker)
+            # fast_info is faster than .info
+            mcap = stock.fast_info.get('market_cap')
+            
+            if mcap:
+                data.append({"Ticker": ticker, "Name": name, "Market Cap": mcap})
+                total_market_cap += mcap
+        except:
+            continue # Skip if data not found
+            
+    df = pd.DataFrame(data)
+    if not df.empty:
+        df["Weight (%)"] = (df["Market Cap"] / total_market_cap) * 100
+        df = df.sort_values(by="Weight (%)", ascending=False).reset_index(drop=True)
+    
+    return df
+
 # -----------------------------------------------------------------------------
 # DATA DICTIONARIES (INDICES)
 # -----------------------------------------------------------------------------
@@ -109,7 +149,7 @@ MARKET_DATA = {
         "benchmark": "^SSMI",
         "name": "🇨🇭 Swiss Market Index",
         "companies": {
-            "^SSMI": "🇨🇭 SMI Benchmark", 
+            # "^SSMI": "🇨🇭 SMI Benchmark",  <-- Removed Benchmark from here so it doesn't skew the weight calc
             "NESN.SW": "Nestlé", "ROG.SW": "Roche", "NOVN.SW": "Novartis",
             "UBSG.SW": "UBS Group", "ZURN.SW": "Zurich Insurance", "CFR.SW": "Richemont",
             "ABBN.SW": "ABB", "SIKA.SW": "Sika", "LONN.SW": "Lonza",
@@ -124,7 +164,7 @@ MARKET_DATA = {
         "benchmark": "^GDAXI",
         "name": "🇩🇪 DAX 40",
         "companies": {
-            "^GDAXI": "🇩🇪 DAX Benchmark",
+            # "^GDAXI": "🇩🇪 DAX Benchmark",
             "SAP.DE": "SAP", "SIE.DE": "Siemens", "ALV.DE": "Allianz",
             "DTE.DE": "Deutsche Telekom", "AIR.DE": "Airbus", "MBG.DE": "Mercedes-Benz",
             "VOW3.DE": "Volkswagen", "BMW.DE": "BMW", "BAS.DE": "BASF",
@@ -137,7 +177,7 @@ MARKET_DATA = {
         "benchmark": "^GSPC",
         "name": "🇺🇸 S&P 500 (Top 15)",
         "companies": {
-            "^GSPC": "🇺🇸 S&P 500 Benchmark",
+            # "^GSPC": "🇺🇸 S&P 500 Benchmark",
             "AAPL": "Apple", "MSFT": "Microsoft", "GOOGL": "Alphabet (Google)",
             "AMZN": "Amazon", "NVDA": "Nvidia", "META": "Meta (Facebook)",
             "TSLA": "Tesla", "BRK-B": "Berkshire Hathaway", "LLY": "Eli Lilly",
@@ -167,6 +207,20 @@ with st.sidebar:
     company_dict = current_market["companies"]
     benchmark_ticker = current_market["benchmark"]
     default_selection = current_market["default"]
+    
+    # Show Index Composition (New Feature)
+    with st.expander(f"📊 {selected_market_key} Composition", expanded=False):
+        st.write("Current weights based on Market Cap:")
+        # We call our new function to get live weights
+        comp_df = get_index_composition(company_dict)
+        if not comp_df.empty:
+            # Display simple dataframe
+            st.dataframe(
+                comp_df[["Name", "Weight (%)"]].style.format({"Weight (%)": "{:.2f}%"}),
+                hide_index=True
+            )
+        else:
+            st.warning("Could not fetch market cap data.")
 
     st.markdown("---")
 
@@ -247,7 +301,11 @@ try:
         st.warning("No data found. Please check your date range.") 
     else:
         if not tickers:
-            st.info(f"Showing Benchmark ({company_dict[benchmark_ticker]}) only. Select stocks in the sidebar to compare.") 
+            # Helper to get benchmark name safely
+            bench_name = MARKET_DATA[selected_market_key]["benchmark"]
+            # We don't have benchmark in company_dict anymore, so we hardcode the display or look it up
+            # For simplicity, we just show the ticker or a generic name
+            st.info(f"Showing Benchmark only. Select stocks in the sidebar to compare.") 
         else:
             st.success(f"Data loaded successfully for {len(tickers_to_load)} tickers (including Benchmark)!") 
         
@@ -283,7 +341,9 @@ try:
 
         # Raw Data Preview (Using Display DF)
         with st.expander("📄 View Last 21 Trading Days"): 
-             # Use the dynamic company_dict for renaming
+             # Use the dynamic company_dict for renaming. 
+             # We add benchmark manually to dict for renaming purposes if needed, 
+             # but .get(x,x) handles it fine.
              preview_df = display_df.rename(columns=lambda x: company_dict.get(x, x)) 
              st.dataframe(preview_df.tail(21))
              

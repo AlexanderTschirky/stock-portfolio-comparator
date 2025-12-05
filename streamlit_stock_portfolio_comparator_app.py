@@ -128,7 +128,7 @@ with st.sidebar:
     st.header("Controls")
     
     smi_companies = { 
-        "^SSMI": "🇨🇭 Swiss Market Index (Benchmark)", 
+        "^SSMI": "Swiss Market Index (Benchmark)", 
         "ROG.SW": "Roche", 
         "NESN.SW": "Nestlé",
         "NOVN.SW": "Novartis",
@@ -314,7 +314,7 @@ try:
             st.subheader("KPI Visualizer over Time")
             
             # Raw Data Preview
-            with st.expander("📄 View Last 21 Trading Days"): 
+            with st.expander("View Last 21 Trading Days"): 
                  preview_df = display_df.rename(columns=lambda x: smi_companies.get(x, x)) 
                  st.dataframe(preview_df.tail(21))
                  

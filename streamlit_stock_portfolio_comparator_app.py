@@ -225,7 +225,7 @@ try:
         st.stop()
     
     if end_date > pd.Timestamp.now().date():
-        st.warning("⚠️ Warning: Future dates selected. Data will only be available up to the last trading day.")
+        st.warning("⚠️ Warning: Future End Date selected. Data will only be available up to the last trading day.")
 
     # 1. PREPARE TICKER LIST
     tickers_to_load = list(set(tickers + ["^SSMI"])) 

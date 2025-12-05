@@ -22,7 +22,7 @@ st.title("📈 SMI Stock & Portfolio Comparator")
 # -----------------------------------------------------------------------------
 # HELPER FUNCTIONS
 # -----------------------------------------------------------------------------
-def calculate_KPI(df): # 
+def calculate_KPI(df, risk_free_rate=0.0): # Added risk_free_rate parameter
     """
     We want to calculate different KPI's of the stocks to later compare the stocks to each other in the application.
     We put it all in one function for efficiency and simplicity, as there are some variables we need for different KPI's.
@@ -43,15 +43,15 @@ def calculate_KPI(df): #
     summary['Ann. Volatility'] = returns.std() * np.sqrt(252) # We calculate the annualized volatility. We assume 252 trading days in a year.
     
     # 5. Sharpe Ratio
-    # Added a small Risk Free Rate assumption (1%) for more realism
-    rf_rate = 0.01 
-    summary['Sharpe Ratio'] = (summary['Ann. Return'] - rf_rate) / summary['Ann. Volatility'] 
+    # We use the user-defined risk_free_rate passed to the function
+    summary['Sharpe Ratio'] = (summary['Ann. Return'] - risk_free_rate) / summary['Ann. Volatility'] 
 
     # 6. Sortino Ratio
     downside_returns = returns.copy() # We copy the returns into the new variable "downside_returns" to further process the data.
     downside_returns[downside_returns > 0] = np.nan # For the Sortino Ratio, we neglect upside volatility, therefore we do not consider positive returns for the calculation.
     annual_downside_vol = downside_returns.std() * np.sqrt(252) # We calculate the annual volatility only for negative days.
-    summary['Sortino Ratio'] = (summary['Ann. Return'] - rf_rate) / annual_downside_vol # We calculate the Sortino Ratio.
+    # We use the user-defined risk_free_rate passed to the function
+    summary['Sortino Ratio'] = (summary['Ann. Return'] - risk_free_rate) / annual_downside_vol # We calculate the Sortino Ratio.
     
     # 7. Max Drawdown
     # The "Worst Case Scenario": buying at the peak and selling at the bottom.
@@ -155,7 +155,7 @@ with st.sidebar: # We use st.sidebar to place everything inside this block on th
     with col2:
         end_date = st.date_input("End Date", value=pd.to_datetime("today")) # The default End Date is today's date
 
-    # 3. PORTFOLIO BUILDER
+    # 3. PORTFOLIO BUILDER (MANUAL)
     st.markdown("---")
     st.header("⚖️ Portfolio Builder") # This is the second header of the sidebar.
     
@@ -181,6 +181,19 @@ with st.sidebar: # We use st.sidebar to place everything inside this block on th
                 st.error("⚠️ Total must be exactly 100%") # If the total of the picked weights is outside of the float error, an error message will be displayed.
             else:
                 st.success("✅ Portfolio Ready") # If the total of the picked weights is good, this message occurs.
+    
+    # 4. MARKET ASSUMPTIONS
+    st.markdown("---")
+    st.header("🏦 Market Assumptions")
+    rf_input = st.number_input(
+        "Risk Free Rate (%)", 
+        min_value=0.0, 
+        max_value=10.0, 
+        value=1.0, 
+        step=0.1,
+        help="This rate is used to calculate the Sharpe and Sortino Ratios. (e.g. 1.0 for 1%)"
+    )
+    risk_free_rate_val = rf_input / 100.0
 
 # -----------------------------------------------------------------------------
 # LOADING DATA
@@ -312,14 +325,16 @@ try:
             elif selected_metric == "Sharpe Ratio (30-Day Rolling)":
                 rolling_return = returns.rolling(window=window).mean() * 252
                 rolling_vol = returns.rolling(window=window).std() * np.sqrt(252)
-                plot_data = rolling_return / rolling_vol
+                # Note: For rolling window, applying fixed RF is an approximation, 
+                # but valid for visualization trends.
+                plot_data = (rolling_return - risk_free_rate_val) / rolling_vol
             
             elif selected_metric == "Sortino Ratio (30-Day Rolling)":
                 downside = returns.copy()
                 downside[downside > 0] = np.nan
                 rolling_downside_vol = downside.rolling(window=window).std() * np.sqrt(252)
                 rolling_return = returns.rolling(window=window).mean() * 252
-                plot_data = rolling_return / rolling_downside_vol
+                plot_data = (rolling_return - risk_free_rate_val) / rolling_downside_vol
                 
             elif selected_metric == "Drawdown (Historical)":
                 cumulative_rets = (1 + returns).cumprod()
@@ -341,7 +356,8 @@ try:
         # -----------------------------------------------------------------------------
         st.subheader("📉 Risk & Return Analysis")
         
-        metrics_df = calculate_KPI(display_df) 
+        # We pass the user-selected Risk Free Rate to the KPI calculator
+        metrics_df = calculate_KPI(display_df, risk_free_rate=risk_free_rate_val) 
         
         metrics_df = metrics_df.rename(index=lambda x: smi_companies.get(x, x)) 
 

@@ -116,7 +116,7 @@ def load_data(ticker_list, start, end):
 # -----------------------------------------------------------------------------
 
 # MAIN PAGE TITLE
-st.title("📈 SMI Stock & Portfolio Comparator")
+st.title("SMI Stock & Portfolio Comparator")
 
 # NAVIGATION ON MAIN PAGE
 # Added "Guide" as the first option
@@ -125,7 +125,7 @@ st.markdown("---")
 
 # SIDEBAR: CONTROLS
 with st.sidebar:
-    st.header("🎛️ Controls")
+    st.header("Controls")
     
     smi_companies = { 
         "^SSMI": "🇨🇭 Swiss Market Index (Benchmark)", 
@@ -169,7 +169,7 @@ with st.sidebar:
 
     # 3. PORTFOLIO BUILDER
     st.markdown("---")
-    st.header("⚖️ Portfolio Builder")
+    st.header("Portfolio Builder")
     
     weights = {} 
     
@@ -189,7 +189,7 @@ with st.sidebar:
             if abs(current_total - 100.0) > 0.1: 
                 st.error("⚠️ Total must be exactly 100%") 
             else:
-                st.success("✅ Portfolio Ready") 
+                st.success("Portfolio Ready") 
     else:
         st.info("Select stocks above to enable.")
 
@@ -214,19 +214,19 @@ try:
     if not tickers:
         st.warning("Please select a stock")
         st.stop()
-
-     # 0.1 DATE CHECKS
+        
+     # 0.1 DATE CHECKS (NEW)
     if start_date > end_date:
-        st.error("⚠️ Error: Start Date must be before End Date.")
+        st.error("Error: Start Date must be before End Date.")
         st.stop()
         
     if start_date > pd.Timestamp.now().date():
-        st.error("⚠️ Error: Start Date must not be in the future.")
+        st.error("Error: Start Date must not be in the future.")
         st.stop()
     
     if end_date > pd.Timestamp.now().date():
-        st.warning("⚠️ Warning: Future End Date selected. Data will only be available up to the last trading day.")
-
+        st.warning("Warning: Future End Date selected. Data will only be available up to the last trading day.")
+    
     # 1. PREPARE TICKER LIST
     tickers_to_load = list(set(tickers + ["^SSMI"])) 
 
@@ -258,7 +258,7 @@ try:
             my_portfolio_price = (1 + portfolio_ret).cumprod() * 100 
             my_portfolio_price.iloc[0] = 100 
             
-            cleaned_df["💼 My Portfolio"] = my_portfolio_price 
+            cleaned_df["My Portfolio"] = my_portfolio_price 
 
         # -----------------------------------------------------------------------------
         # CREATE DISPLAY DATAFRAME (FILTERED BY USER DATE)
@@ -278,24 +278,24 @@ try:
             It enables you to analyze historical performance, understand complex risk metrics, and even forecast future volatility using Machine Learning.
             """)
             
-            st.subheader("📚 How to use this App")
+            st.subheader("How to use this App")
             
             col_g1, col_g2, col_g3 = st.columns(3)
             
             with col_g1:
-                st.info("📊 **KPI Visualizer**")
+                st.info("**KPI Visualizer**")
                 st.write("View historical performance over time. Compare your portfolio against the SMI Benchmark and visualize metrics like Drawdowns and Cumulative Returns.")
                 
             with col_g2:
-                st.warning("📉 **Risk & Correlation**")
+                st.warning("**Risk & Correlation**")
                 st.write("Deep dive into the Risk-Return relationship. Use the Scatter Plot to find the 'Efficient Frontier' and use the Heatmap to check if your stocks are diversified.")
                 
             with col_g3:
-                st.success("🤖 **Volatility Forecasting**")
+                st.success("**Volatility Forecasting**")
                 st.write("Use our Random Forest Machine Learning model to predict how volatile a stock might be in the future (Next Day, Week, or Month).")
             
             st.markdown("---")
-            st.subheader("📖 Financial Glossary")
+            st.subheader("Financial Glossary")
             st.write("Understanding the metrics used in this application:")
             
             with st.expander("See Definitions", expanded=True):
@@ -311,7 +311,7 @@ try:
         # PAGE 2: KPI VISUALIZER
         # -----------------------------------------------------------------------------
         elif page == "KPI Visualizer":
-            st.subheader("📊 KPI Visualizer over Time")
+            st.subheader("KPI Visualizer over Time")
             
             # Raw Data Preview
             with st.expander("📄 View Last 21 Trading Days"): 
@@ -321,7 +321,7 @@ try:
             csv_data = preview_df.to_csv().encode('utf-8') 
                  
             st.download_button( 
-                label="⬇️ Download Raw Price Data (CSV)", 
+                label="Download Raw Price Data (CSV)", 
                 data=csv_data, 
                 file_name="stock_price_data.csv",
                 mime="text/csv"
@@ -384,7 +384,7 @@ try:
         # PAGE 3: RISK & CORRELATION
         # -----------------------------------------------------------------------------
         elif page == "Risk & Correlation":
-            st.subheader("📉 Risk & Return Analysis")
+            st.subheader("Risk & Return Analysis")
             
             metrics_df = calculate_KPI(display_df, risk_free_rate=risk_free_rate_val) 
             
@@ -442,7 +442,7 @@ try:
 
             # Correlation Section
             st.markdown("---")
-            st.subheader("🔗 Correlation Matrix")
+            st.subheader("Correlation Matrix")
             st.write("This heatmap shows how stocks move together. +1 means they move perfectly in sync (blue), -1 means they move in opposite directions (red).")
 
             if not display_df.empty:

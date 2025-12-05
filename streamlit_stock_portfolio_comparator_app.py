@@ -19,7 +19,7 @@ st.set_page_config(page_title="SMI Stock & Portfolio Comparator", layout="wide")
 # -----------------------------------------------------------------------------
 # HELPER FUNCTIONS
 # -----------------------------------------------------------------------------
-def calculate_KPI(df, risk_free_rate=0.0): # Added risk_free_rate parameter
+def calculate_KPI(df, risk_free_rate=0.0): 
     """
     We want to calculate different KPI's of the stocks to later compare the stocks to each other in the application.
     We put it all in one function for efficiency and simplicity, as there are some variables we need for different KPI's.
@@ -67,11 +67,6 @@ def prepare_regression_data(series, window=21, horizon=1):
     """
     For the Machine Learning part, we want to predict next-day absolute return (volatility) of a stock.
     We use the absolute returns of the last trading month (21 days) for this.
-    
-    Added 'horizon' parameter:
-    - horizon=1: Predict next day's volatility.
-    - horizon=5: Predict average volatility over the next 5 days (1 Week).
-    - horizon=21: Predict average volatility over the next 21 days (1 Month).
     """
     # Robust check: If input is already a DataFrame, use it directly. If Series, convert.
     if isinstance(series, pd.DataFrame):
@@ -84,14 +79,9 @@ def prepare_regression_data(series, window=21, horizon=1):
     df['Abs_Return'] = df['Close'].pct_change().abs() # We calculate the absolute daily returns
     
     # TARGET CREATION:
-    # If horizon is 1, we just shift by -1 (tomorrow).
-    # If horizon is > 1, we calculate the rolling average of the FUTURE and shift it back.
     if horizon == 1:
         df['Target'] = df['Abs_Return'].shift(-1)
     else:
-        # Calculate rolling mean of the NEXT 'horizon' days.
-        # .rolling() looks backwards, so we calculate it first, then shift backwards by 'horizon'.
-        # This aligns "today's row" with the "average of the next N days".
         indexer = pd.api.indexers.FixedForwardWindowIndexer(window_size=horizon)
         df['Target'] = df['Abs_Return'].rolling(window=indexer).mean()
 
@@ -104,22 +94,46 @@ def prepare_regression_data(series, window=21, horizon=1):
     return df[feature_cols], df['Target'] # The function returns two separate tables, one containing the lag-columns, one containing the "Target". 
 
 # -----------------------------------------------------------------------------
-# SIDEBAR CONTROLS & NAVIGATION
+# LOADING DATA FUNCTION
 # -----------------------------------------------------------------------------
-# We use 'with st.sidebar' to place everything inside this block on the left side.
-with st.sidebar: # We use st.sidebar to place everything inside this block on the sidebar on the left.
-    st.title("📈 SMI Comparator")
+@st.cache_data 
+def load_data(ticker_list, start, end): 
+    if not ticker_list:
+        return pd.DataFrame() 
     
-    # NAVIGATION
+    safe_start = pd.Timestamp.today() - pd.DateOffset(years=2)
+    download_start = min(start, safe_start)
+    
+    data = yf.download(ticker_list, start=download_start, end=end, auto_adjust=True) 
+    
+    if len(ticker_list) == 1:
+        return data['Close'].to_frame(name=ticker_list[0]) 
+    
+    return data['Close']
+
+# -----------------------------------------------------------------------------
+# PAGE STRUCTURE & NAVIGATION
+# -----------------------------------------------------------------------------
+
+# SIDEBAR: NAVIGATION ONLY
+with st.sidebar: 
+    st.title("Navigation")
     page = st.radio("Go to", ["KPI Visualizer", "Risk & Correlation", "Volatility Forecasting"])
     st.markdown("---")
+    st.info("ℹ️ Note: All analysis controls (Stocks, Dates, Weights) are now located at the top of the main page.")
 
-    st.header("🎛️ Controls") # This is the header of the sidebar.
+# MAIN PAGE TITLE
+st.title("📈 SMI Stock & Portfolio Comparator")
 
-    # 1. STOCK SELECTION
-    smi_companies = { # We open a dictionary for the stocks that can be picked.
-        "^SSMI": "🇨🇭 Swiss Market Index (Benchmark)", # We add the SMI as the Benchmark for our Risk-Return-Analysis.
-        "ROG.SW": "Roche", # For each stock, we ad the ticker symbols to get the data from yfinance aswell as the company name to make the application more user-friendly.
+# -----------------------------------------------------------------------------
+# TOP CONTROLS (MOVED FROM SIDEBAR)
+# -----------------------------------------------------------------------------
+# We create an expander to hold all the settings so they don't take up too much space initially.
+with st.expander("⚙️ Analysis Settings & Portfolio", expanded=True):
+    
+    smi_companies = { 
+        "^SSMI": "🇨🇭 Swiss Market Index (Benchmark)", 
+        "ROG.SW": "Roche", 
         "NESN.SW": "Nestlé",
         "NOVN.SW": "Novartis",
         "UBSG.SW": "UBS Group",
@@ -141,113 +155,86 @@ with st.sidebar: # We use st.sidebar to place everything inside this block on th
         "LOGN.SW": "Logitech"
     }
 
+    # Row 1: Stock Selection & Dates
+    col_c1, col_c2, col_c3 = st.columns([2, 1, 1])
+    
+    with col_c1:
+        selectable_tickers = [t for t in smi_companies.keys() if t != "^SSMI"] 
+        tickers = st.multiselect( 
+            "Select Stocks", 
+            options=selectable_tickers, 
+            format_func=lambda x: f"{smi_companies[x]} ({x})", 
+            default=["NESN.SW", "NOVN.SW", "UBSG.SW"] 
+        )
 
-    selectable_tickers = [t for t in smi_companies.keys() if t != "^SSMI"] # We exclude the SMI from the dropdown options to make sure the Benchmark Index cannot be manually deselected.
+    with col_c2:
+        start_date = st.date_input("Start Date", value=pd.to_datetime("2020-01-01")) 
+    
+    with col_c3:
+        end_date = st.date_input("End Date", value=pd.to_datetime("today")) 
 
-    tickers = st.multiselect( # This creates the dropdown to pick certain stocks.
-        "Select Stocks", 
-        options=selectable_tickers, 
-        format_func=lambda x: f"{smi_companies[x]} ({x})", # We include a lambda function so that the full company names are shown instead of the ticker symbols.
-        default=["NESN.SW", "NOVN.SW", "UBSG.SW"]  # By default, the stocks of Nestle, Roche and UBS Group will be selected.
-    )
-
-    # 2. DATE SELECTION 
-    col1, col2 = st.columns(2) # This builds two columns for the start and end date
-    with col1:
-        start_date = st.date_input("Start Date", value=pd.to_datetime("2020-01-01")) # The default Start Date is 2020-01-01
-    with col2:
-        end_date = st.date_input("End Date", value=pd.to_datetime("today")) # The default End Date is today's date
-
-    # 3. PORTFOLIO BUILDER (MANUAL)
+    # Row 2: Portfolio Builder & Market Assumptions
     st.markdown("---")
-    st.header("⚖️ Portfolio Builder") # This is the second header of the sidebar.
+    col_p1, col_p2 = st.columns([2, 1])
     
-    weights = {} # We open up an empty dictionary to store the weights the user enters
-    
-    # Only show weights input if tickers are selected
-    if tickers:
-        with st.expander("Assign Weights (%)", expanded=True): # We open an expander to assign the weights, it is expanded by default.
-            st.write("Assign percentage weights. Must sum to 100%.") # Descripion for the user.
+    weights = {} 
+    risk_free_rate_val = 0.0
+
+    with col_p1:
+        st.subheader("⚖️ Portfolio Weights")
+        if tickers:
+            st.caption("Assign percentage weights. Must sum to 100%.")
             
-            default_weight = round(100.0 / len(tickers), 2) # We set all weights of the selected stocks equal by default
+            # Create columns for weights to save vertical space
+            # We split the tickers into chunks of 3 for display
+            cols = st.columns(3)
+            default_weight = round(100.0 / len(tickers), 2) 
             
-            for t in tickers:
-                name = smi_companies[t] # This makes sure we use the company name, not the ticker symbol.
-                # Input for Percentage (0-100)
-                weights[t] = st.number_input(f"{name} (%)", min_value=0.0, max_value=100.0, value=default_weight, step=1.0) # For any stock, a weight between 0% and 100% can be chosen.
-                # If the plus or minus sign are used, the weight will increase or decrease by 1%.
+            for i, t in enumerate(tickers):
+                col_idx = i % 3
+                with cols[col_idx]:
+                    name = smi_companies[t]
+                    weights[t] = st.number_input(f"{name} (%)", min_value=0.0, max_value=100.0, value=default_weight, step=1.0)
 
             current_total = sum(weights.values())
-            st.write(f"**Total Allocation:** {current_total:.1f}%") # We display the current total allocation
+            st.write(f"**Total Allocation:** {current_total:.1f}%") 
             
-            if abs(current_total - 100.0) > 0.1: # We allow for a tiny float error of 0.1% of the chosen weights
-                st.error("⚠️ Total must be exactly 100%") # If the total of the picked weights is outside of the float error, an error message will be displayed.
+            if abs(current_total - 100.0) > 0.1: 
+                st.error("⚠️ Total must be exactly 100%") 
             else:
-                st.success("✅ Portfolio Ready") # If the total of the picked weights is good, this message occurs.
-    
-    # 4. MARKET ASSUMPTIONS
-    st.markdown("---")
-    st.header("🏦 Market Assumptions")
-    rf_input = st.number_input(
-        "Risk Free Rate (%)", 
-        min_value=0.0, 
-        max_value=10.0, 
-        value=1.0, 
-        step=0.1,
-        help="This rate is used to calculate the Sharpe and Sortino Ratios. (e.g. 1.0 for 1%)"
-    )
-    risk_free_rate_val = rf_input / 100.0
+                st.success("✅ Portfolio Ready") 
+        else:
+            st.info("Select stocks to build a portfolio.")
 
-# -----------------------------------------------------------------------------
-# LOADING DATA
-# -----------------------------------------------------------------------------
-# This function downloads the data. 
-@st.cache_data # This is a decorator provided by the Streamlit library, it saves the data it loaded once in the memory. This saves time as the data is not loaded again.
-def load_data(ticker_list, start, end): # We define a function to download the data selected at the sidebar.
-    if not ticker_list:
-        return pd.DataFrame() # If the list is empty, nothing is downloaded
-    
-    # CRITICAL CHANGE: We always download from a "safe start" (2 years ago) to ensure ML works.
-    # We will filter for the user's dates later for display purposes.
-    safe_start = pd.Timestamp.today() - pd.DateOffset(years=2)
-    # Use the earlier of the two dates (User's start or Safe start)
-    download_start = min(start, safe_start)
-    
-    data = yf.download(ticker_list, start=download_start, end=end, auto_adjust=True) # We download the data from yfinance. We use auto_adjust=True tu handle splits/dividends.
-    
-    # Formatting Fix for Single Ticker vs Multiple Tickers
-    if len(ticker_list) == 1:
-        return data['Close'].to_frame(name=ticker_list[0]) # We need this logic so that yfinance defines a single-stock-ticker the same as a multi-stock table.
-    
-    return data['Close']
+    with col_p2:
+        st.subheader("🏦 Assumptions")
+        rf_input = st.number_input(
+            "Risk Free Rate (%)", 
+            min_value=0.0, 
+            max_value=10.0, 
+            value=1.0, 
+            step=0.1,
+            help="Used for Sharpe/Sortino Ratios."
+        )
+        risk_free_rate_val = rf_input / 100.0
 
 # -----------------------------------------------------------------------------
 # MAIN APP LOGIC
 # -----------------------------------------------------------------------------
 try:
     # 1. PREPARE TICKER LIST
-    tickers_to_load = list(set(tickers + ["^SSMI"])) # The tickers that are selected are loaded. The SMI is always loaded.
+    tickers_to_load = list(set(tickers + ["^SSMI"])) 
 
     # 2. CALL THE FUNCTION
-    # Note: load_data now handles fetching extended history internally
     full_history_df = load_data(tickers_to_load, pd.Timestamp(start_date), pd.Timestamp(end_date)) 
     
     # 3. CHECK IF DATA IS EMPTY
     if full_history_df.empty:
-        st.warning("No data found. Please check your date range.") # If the DataFrame is completely empty, a warning is shown. This should never be the case as the SMI is always loaded.
+        st.warning("No data found. Please check your date range.") 
     else:
-        if not tickers:
-            st.info("Showing Benchmark (SMI) only. Select stocks in the sidebar to compare.") # If only the SMI is loaded, it shows this message.
-        else:
-            # Only show this success message once or at the top of the selected page
-            st.success(f"Data loaded successfully for {len(tickers_to_load)} tickers (including Benchmark)!") 
-        
         # -----------------------------------------------------------------------------
         # DATA PRE-PROCESSING & PORTFOLIO CALCULATION (ON FULL HISTORY)
         # -----------------------------------------------------------------------------
-        # We calculate the portfolio on the FULL history first, so ML has enough data.
-        
-        # Drop rows with missing data
         cleaned_df = full_history_df.dropna()
         
         valid_portfolio = False 
@@ -262,19 +249,15 @@ try:
             
             portfolio_ret = daily_returns.dot(final_weights) 
             
-            # Construct Price Series (Start at 100 on the very first day of history)
+            # Construct Price Series
             my_portfolio_price = (1 + portfolio_ret).cumprod() * 100 
             my_portfolio_price.iloc[0] = 100 
             
             cleaned_df["💼 My Portfolio"] = my_portfolio_price 
 
-        elif tickers and abs(current_total - 100.0) > 0.1:
-            st.warning("⚠️ 'My Portfolio' not calculated: Weights do not sum to 100%.")
-
         # -----------------------------------------------------------------------------
         # CREATE DISPLAY DATAFRAME (FILTERED BY USER DATE)
         # -----------------------------------------------------------------------------
-        # Now we slice the data to show ONLY what the user asked for in the charts/tables
         display_start = pd.Timestamp(start_date).tz_localize(None)
         display_end = pd.Timestamp(end_date).tz_localize(None)
         display_df = cleaned_df.loc[display_start:display_end]
@@ -283,9 +266,9 @@ try:
         # PAGE 1: KPI VISUALIZER
         # -----------------------------------------------------------------------------
         if page == "KPI Visualizer":
-            st.title("📊 KPI Visualizer over Time")
+            st.subheader("📊 KPI Visualizer over Time")
             
-            # Raw Data Preview (Using Display DF)
+            # Raw Data Preview
             with st.expander("📄 View Last 21 Trading Days"): 
                  preview_df = display_df.rename(columns=lambda x: smi_companies.get(x, x)) 
                  st.dataframe(preview_df.tail(21))
@@ -296,8 +279,7 @@ try:
                 label="⬇️ Download Raw Price Data (CSV)", 
                 data=csv_data, 
                 file_name="stock_price_data.csv",
-                mime="text/csv",
-                help="Click to download the full historical price data as a CSV file."
+                mime="text/csv"
             )
 
             if not display_df.empty:
@@ -318,7 +300,6 @@ try:
                 window = 30 
                 
                 if selected_metric == "Cumulative Return (Indexed to 100)":
-                    # Re-index to 100 for the start of the visible period
                     plot_data = display_df / display_df.iloc[0] * 100
                     
                 elif selected_metric == "Annualized Return (30-Day Rolling)":
@@ -330,8 +311,6 @@ try:
                 elif selected_metric == "Sharpe Ratio (30-Day Rolling)":
                     rolling_return = returns.rolling(window=window).mean() * 252
                     rolling_vol = returns.rolling(window=window).std() * np.sqrt(252)
-                    # Note: For rolling window, applying fixed RF is an approximation, 
-                    # but valid for visualization trends.
                     plot_data = (rolling_return - risk_free_rate_val) / rolling_vol
                 
                 elif selected_metric == "Sortino Ratio (30-Day Rolling)":
@@ -360,9 +339,8 @@ try:
         # PAGE 2: RISK & CORRELATION
         # -----------------------------------------------------------------------------
         elif page == "Risk & Correlation":
-            st.title("📉 Risk & Return Analysis")
+            st.subheader("📉 Risk & Return Analysis")
             
-            # We pass the user-selected Risk Free Rate to the KPI calculator
             metrics_df = calculate_KPI(display_df, risk_free_rate=risk_free_rate_val) 
             
             metrics_df = metrics_df.rename(index=lambda x: smi_companies.get(x, x)) 
@@ -422,33 +400,17 @@ try:
             st.subheader("🔗 Correlation Matrix")
             st.write("This heatmap shows how stocks move together. +1 means they move perfectly in sync (blue), -1 means they move in opposite directions (red).")
 
-            # Get returns again specifically for the Correlation Matrix
             if not display_df.empty:
                 corr_returns = display_df.pct_change().dropna()
-                
-                # Calculate Correlation
                 corr_matrix = corr_returns.corr()
                 
-                # Only show if we have more than 1 stock to compare
                 if len(corr_matrix.columns) > 1:
-                    # 1. Rename tickers to Company Names
                     corr_matrix_renamed = corr_matrix.rename(index=lambda x: smi_companies.get(x, x), columns=lambda x: smi_companies.get(x, x))
-                    
-                    # 2. Reset index to move the rows into a column called "index" (or whatever the index name was)
                     corr_data = corr_matrix_renamed.reset_index()
-                    
-                    # 3. Rename that new column to 'Stock A' explicitly to avoid "index" not found errors
-                    # The column at index 0 is always the one we just reset.
                     corr_data = corr_data.rename(columns={corr_data.columns[0]: 'Stock A'})
-                    
-                    # 4. Melt: Turn the wide table into a long table
-                    # id_vars='Stock A' keeps that column fixed, while the other columns (Stock Bs) get melted
                     corr_data = corr_data.melt(id_vars='Stock A')
-                    
-                    # 5. Rename columns for clarity
                     corr_data.columns = ['Stock A', 'Stock B', 'Correlation']
 
-                    # Create Heatmap
                     heatmap = alt.Chart(corr_data).mark_rect().encode(
                         x=alt.X('Stock A', title=None),
                         y=alt.Y('Stock B', title=None),
@@ -458,7 +420,6 @@ try:
                         height=500
                     )
 
-                    # Add text labels (numbers inside boxes)
                     text = heatmap.mark_text(baseline='middle').encode(
                         text=alt.Text('Correlation', format='.2f'),
                         color=alt.condition(
@@ -476,14 +437,13 @@ try:
         # PAGE 3: VOLATILITY FORECASTING
         # -----------------------------------------------------------------------------
         elif page == "Volatility Forecasting":
-            st.title("🤖 Machine Learning: Volatility Prediction") 
+            st.subheader("🤖 Machine Learning: Volatility Prediction") 
             
             st.write("""
             This model predicts the **Exact Volatility** (Average Absolute Daily Return) over a specific time horizon.
             It uses the past 21 days of volatility to learn patterns using a Random Forest Regressor.
             """) 
             
-            # User selects stock (options based on cleaned_df which has portfolio)
             ml_opts = list(cleaned_df.columns) 
             col_ml_1, col_ml_2 = st.columns(2)
             
@@ -491,17 +451,12 @@ try:
                 ml_ticker = st.selectbox("Select Stock to Predict", ml_opts, format_func=lambda x: smi_companies.get(x, x)) 
             
             with col_ml_2:
-                # Dropdown for Forecast Horizon
                 horizon_dict = {"Next Day": 1, "Next Week (5 Days)": 5, "Next Month (21 Days)": 21}
                 horizon_label = st.selectbox("Select Forecast Horizon", list(horizon_dict.keys()))
                 horizon_val = horizon_dict[horizon_label]
 
             if ml_ticker:
-                # IMPORTANT: We use 'cleaned_df' here, which has the FULL 2-year history
-                # This ensures ML always works even if 'display_df' is short.
                 subset_series = cleaned_df[ml_ticker].dropna()
-                
-                # Pass the selected horizon to the helper function
                 X, y = prepare_regression_data(subset_series, window=21, horizon=horizon_val)
                 
                 if len(X) > 50: 
@@ -517,7 +472,6 @@ try:
                     
                     st.markdown(f"#### Volatility Forecast for **{smi_companies.get(ml_ticker, ml_ticker)}** ({horizon_label})") 
                     
-                    # Predict Next Period
                     last_21_days = X.iloc[-1:].values 
                     next_val_pred = model.predict(last_21_days)[0] 
                     
@@ -525,7 +479,6 @@ try:
                     col1.metric(f"Predicted Volatility ({horizon_label})", f"{next_val_pred:.2%}")
                     col2.metric("Mean Absolute Error (Test Set)", f"{mae:.2%}")
 
-                    # Chart for ML (Test Set Only)
                     results_df = pd.DataFrame({
                         'Date': y_test.index, 
                         'Actual Volatility': y_test.values, 
@@ -534,8 +487,7 @@ try:
                     
                     st.write(f"**Predicted vs. Actual Volatility ({horizon_label}):**") 
                     st.line_chart(results_df) 
-                    
-                    st.caption("The lower the ratio of MAE to Volatility, the more accurate our model is. If the lines overlap, the model is doing a good job.")
+                    st.caption("The lower the ratio of MAE to Volatility, the more accurate our model is.")
                     
                 else:
                     st.warning("Not enough data. Try a longer date range.") 

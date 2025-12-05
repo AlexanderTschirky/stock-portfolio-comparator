@@ -112,24 +112,20 @@ def load_data(ticker_list, start, end):
     return data['Close']
 
 # -----------------------------------------------------------------------------
-# PAGE STRUCTURE & NAVIGATION
+# MAIN LAYOUT & CONTROLS
 # -----------------------------------------------------------------------------
-
-# SIDEBAR: NAVIGATION ONLY
-with st.sidebar: 
-    st.title("Navigation")
-    page = st.radio("Go to", ["KPI Visualizer", "Risk & Correlation", "Volatility Forecasting"])
-    st.markdown("---")
-    st.info("ℹ️ Note: All analysis controls (Stocks, Dates, Weights) are now located at the top of the main page.")
 
 # MAIN PAGE TITLE
 st.title("📈 SMI Stock & Portfolio Comparator")
 
-# -----------------------------------------------------------------------------
-# TOP CONTROLS (MOVED FROM SIDEBAR)
-# -----------------------------------------------------------------------------
-# We create an expander to hold all the settings so they don't take up too much space initially.
-with st.expander("⚙️ Analysis Settings & Portfolio", expanded=True):
+# NAVIGATION ON MAIN PAGE
+# We use st.radio with horizontal=True to create a navbar-like feel at the top
+page = st.radio("Navigation", ["KPI Visualizer", "Risk & Correlation", "Volatility Forecasting"], horizontal=True, label_visibility="collapsed")
+st.markdown("---")
+
+# SIDEBAR: CONTROLS
+with st.sidebar:
+    st.header("🎛️ Controls")
     
     smi_companies = { 
         "^SSMI": "🇨🇭 Swiss Market Index (Benchmark)", 
@@ -155,46 +151,37 @@ with st.expander("⚙️ Analysis Settings & Portfolio", expanded=True):
         "LOGN.SW": "Logitech"
     }
 
-    # Row 1: Stock Selection & Dates
-    col_c1, col_c2, col_c3 = st.columns([2, 1, 1])
-    
-    with col_c1:
-        selectable_tickers = [t for t in smi_companies.keys() if t != "^SSMI"] 
-        tickers = st.multiselect( 
-            "Select Stocks", 
-            options=selectable_tickers, 
-            format_func=lambda x: f"{smi_companies[x]} ({x})", 
-            default=["NESN.SW", "NOVN.SW", "UBSG.SW"] 
-        )
+    # 1. STOCK SELECTION
+    selectable_tickers = [t for t in smi_companies.keys() if t != "^SSMI"] 
+    tickers = st.multiselect( 
+        "Select Stocks", 
+        options=selectable_tickers, 
+        format_func=lambda x: f"{smi_companies[x]} ({x})", 
+        default=["NESN.SW", "NOVN.SW", "UBSG.SW"] 
+    )
 
-    with col_c2:
+    # 2. DATE SELECTION
+    col_d1, col_d2 = st.columns(2)
+    with col_d1:
         start_date = st.date_input("Start Date", value=pd.to_datetime("2020-01-01")) 
-    
-    with col_c3:
+    with col_d2:
         end_date = st.date_input("End Date", value=pd.to_datetime("today")) 
 
-    # Row 2: Portfolio Builder & Market Assumptions
+    # 3. PORTFOLIO BUILDER
     st.markdown("---")
-    col_p1, col_p2 = st.columns([2, 1])
+    st.header("⚖️ Portfolio Builder")
     
     weights = {} 
-    risk_free_rate_val = 0.0
-
-    with col_p1:
-        st.subheader("⚖️ Portfolio Weights")
-        if tickers:
-            st.caption("Assign percentage weights. Must sum to 100%.")
+    
+    if tickers:
+        with st.expander("Assign Weights (%)", expanded=True): 
+            st.write("Assign percentage weights. Must sum to 100%.") 
             
-            # Create columns for weights to save vertical space
-            # We split the tickers into chunks of 3 for display
-            cols = st.columns(3)
             default_weight = round(100.0 / len(tickers), 2) 
             
-            for i, t in enumerate(tickers):
-                col_idx = i % 3
-                with cols[col_idx]:
-                    name = smi_companies[t]
-                    weights[t] = st.number_input(f"{name} (%)", min_value=0.0, max_value=100.0, value=default_weight, step=1.0)
+            for t in tickers:
+                name = smi_companies[t] 
+                weights[t] = st.number_input(f"{name} (%)", min_value=0.0, max_value=100.0, value=default_weight, step=1.0)
 
             current_total = sum(weights.values())
             st.write(f"**Total Allocation:** {current_total:.1f}%") 
@@ -203,20 +190,21 @@ with st.expander("⚙️ Analysis Settings & Portfolio", expanded=True):
                 st.error("⚠️ Total must be exactly 100%") 
             else:
                 st.success("✅ Portfolio Ready") 
-        else:
-            st.info("Select stocks to build a portfolio.")
+    else:
+        st.info("Select stocks above to enable.")
 
-    with col_p2:
-        st.subheader("🏦 Assumptions")
-        rf_input = st.number_input(
-            "Risk Free Rate (%)", 
-            min_value=0.0, 
-            max_value=10.0, 
-            value=1.0, 
-            step=0.1,
-            help="Used for Sharpe/Sortino Ratios."
-        )
-        risk_free_rate_val = rf_input / 100.0
+    # 4. MARKET ASSUMPTIONS
+    st.markdown("---")
+    st.header("🏦 Assumptions")
+    rf_input = st.number_input(
+        "Risk Free Rate (%)", 
+        min_value=0.0, 
+        max_value=10.0, 
+        value=1.0, 
+        step=0.1,
+        help="Used for Sharpe/Sortino Ratios."
+    )
+    risk_free_rate_val = rf_input / 100.0
 
 # -----------------------------------------------------------------------------
 # MAIN APP LOGIC

@@ -1,15 +1,15 @@
+# -----------------------------------------------------------------------------
 # IMPORTS & CONFIGURATION
 # -----------------------------------------------------------------------------
 import streamlit as st
 import pandas as pd
 import yfinance as yf
 import numpy as np
-import altair as alt
-# Removed plotly imports to fix ModuleNotFoundError
+import matplotlib.pyplot as plt
 from sklearn.ensemble import RandomForestRegressor
 from sklearn.metrics import mean_absolute_error
 
-# Page Config
+# Page Config: Sets up the browser tab title and wide layout
 st.set_page_config(page_title="SMI Pro Comparator", layout="wide", page_icon="📈")
 
 # -----------------------------------------------------------------------------
@@ -45,8 +45,8 @@ SMI_COMPANIES = {
 
 def calculate_KPI(df, risk_free_rate=0.0):
     """
-    Calculates detailed financial KPIs.
-    Added 'risk_free_rate' parameter for more accurate Sharpe Ratio.
+    Calculates detailed financial KPIs for the summary table.
+    Now includes 'risk_free_rate' for a more accurate Sharpe Ratio calculation.
     """
     summary = pd.DataFrame(index=df.columns)
     
@@ -66,9 +66,9 @@ def calculate_KPI(df, risk_free_rate=0.0):
     summary['Sharpe Ratio'] = (summary['Ann. Return'] - risk_free_rate) / summary['Ann. Volatility']
 
     # 6. Sortino Ratio (Downside Deviation)
-    target_return = 0
+    # We replace positive returns with 0 to calculate downside risk only
     downside_returns = returns.copy()
-    downside_returns[downside_returns > target_return] = 0 # Replace positive returns with 0 for calculation
+    downside_returns[downside_returns > 0] = 0 
     annual_downside_vol = downside_returns.std() * np.sqrt(252)
     
     # Avoid division by zero
@@ -91,7 +91,7 @@ def calculate_KPI(df, risk_free_rate=0.0):
 
 def prepare_regression_data(series, window=21, horizon=1):
     """
-    Prepares data for ML Volatility prediction.
+    Prepares data for the Machine Learning Volatility prediction.
     """
     if isinstance(series, pd.DataFrame):
         df = series.copy()
@@ -101,14 +101,15 @@ def prepare_regression_data(series, window=21, horizon=1):
         
     df['Abs_Return'] = df['Close'].pct_change().abs()
     
-    # Target Creation
+    # Target Creation: Predicting future volatility
     if horizon == 1:
         df['Target'] = df['Abs_Return'].shift(-1)
     else:
+        # Calculate rolling mean of the NEXT 'horizon' days
         indexer = pd.api.indexers.FixedForwardWindowIndexer(window_size=horizon)
         df['Target'] = df['Abs_Return'].rolling(window=indexer).mean()
 
-    # Feature Engineering (Lags)
+    # Feature Engineering: Creating Lags (Past Volatility)
     for i in range(1, window + 1):
         df[f'Vol_Lag_{i}'] = df['Abs_Return'].shift(i)
     
@@ -119,13 +120,14 @@ def prepare_regression_data(series, window=21, horizon=1):
 @st.cache_data
 def load_data(ticker_list, start_date):
     """
-    Downloads data. Cached to prevent re-downloading on every slider change.
-    We download from a fixed 'safe' start date to ensure ML has history.
+    Downloads data using yfinance. 
+    Cached to prevent re-downloading on every interaction.
     """
     if not ticker_list:
         return pd.DataFrame()
     
     try:
+        # We assume today is the end date for loading
         data = yf.download(ticker_list, start=start_date, group_by='ticker', auto_adjust=True)
         
         # Handle MultiIndex / Single Index nuances of yfinance
@@ -133,8 +135,7 @@ def load_data(ticker_list, start_date):
             # If single ticker, yf returns a simple dataframe, we just want Close
             return data['Close'].to_frame(name=ticker_list[0])
         else:
-            # If multiple, it returns a MultiIndex (Ticker, OHLCV). We extract Close.
-            # We iterate to robustly grab 'Close' for each ticker
+            # If multiple, it returns a MultiIndex (Ticker, OHLCV). We robustly extract Close.
             close_data = pd.DataFrame()
             for t in ticker_list:
                 try:
@@ -173,17 +174,17 @@ with st.sidebar:
     start_date = col1.date_input("Start", value=pd.to_datetime("2020-01-01"))
     end_date = col2.date_input("End", value=pd.to_datetime("today"))
     
-    # 3. Risk Free Rate
+    # 3. Risk Free Rate (New Feature)
     rf_rate = st.number_input("Risk Free Rate (%)", value=1.0, step=0.1) / 100
 
-    # 4. Portfolio Weights Logic
+    # 4. Portfolio Weights Logic (Improved UX)
     st.markdown("---")
     st.header("⚖️ Portfolio Allocation")
     
     weights = {}
     if tickers:
         with st.expander("Adjust Weights", expanded=True):
-            # Helper to normalize weights if requested
+            # FEATURE: Auto-Equalize Weights Button
             if st.button("Auto-Equalize Weights"):
                 equal_weight = 100.0 / len(tickers)
                 for t in tickers:
@@ -191,7 +192,7 @@ with st.sidebar:
             
             total_weight = 0
             for t in tickers:
-                # Key logic: Use session_state to allow programmatic updates (Auto-Equalize)
+                # Key logic: Use session_state to allow programmatic updates
                 key = f"w_{t}"
                 if key not in st.session_state:
                     st.session_state[key] = 100.0 / len(tickers)
@@ -204,27 +205,25 @@ with st.sidebar:
                 )
                 total_weight += weights[t]
 
-            # Dynamic Feedback
+            # Dynamic Feedback on Total Weight
             diff = total_weight - 100.0
             if abs(diff) < 0.1:
                 st.success(f"Total: {total_weight:.1f}% ✅")
             else:
                 st.error(f"Total: {total_weight:.1f}% (Diff: {diff:.1f}%) ❌")
 
-
 # -----------------------------------------------------------------------------
 # DATA LOADING & PROCESSING
 # -----------------------------------------------------------------------------
 
-# Download ample history for ML, filter later for display
-# We go back 2 years + 1 month from the user's start date to ensure lags work
+# We calculate the "Safe Start" date (2 years back) to ensure ML has enough history
 buffer_date = pd.Timestamp(start_date) - pd.DateOffset(years=2)
 tickers_to_load = list(set(tickers + ["^SSMI"]))
 
 full_data = load_data(tickers_to_load, buffer_date)
 
 if full_data.empty:
-    st.warning("No data loaded. Please check your internet connection or ticker selection.")
+    st.warning("No data loaded. Please check your ticker selection.")
     st.stop()
 
 # -----------------------------------------------------------------------------
@@ -232,7 +231,7 @@ if full_data.empty:
 # -----------------------------------------------------------------------------
 cleaned_df = full_data.dropna()
 
-# Calculate Portfolio logic if weights are valid
+# Calculate Portfolio logic only if weights are valid
 has_portfolio = False
 if tickers and abs(sum(weights.values()) - 100.0) < 0.1:
     has_portfolio = True
@@ -241,7 +240,6 @@ if tickers and abs(sum(weights.values()) - 100.0) < 0.1:
     selection = cleaned_df[tickers]
     
     # Calculate weighted returns
-    # Formula: Sum(Weight * DailyReturn) for each day
     w_list = [weights[t] / 100.0 for t in tickers]
     portfolio_daily_ret = selection.pct_change().dot(w_list)
     
@@ -254,47 +252,91 @@ if tickers and abs(sum(weights.values()) - 100.0) < 0.1:
 # -----------------------------------------------------------------------------
 # FILTERING FOR DISPLAY
 # -----------------------------------------------------------------------------
-# Now we cut the dataframe to the user's specific requested date range
+# Now we cut the dataframe to the user's specific requested date range for the charts
 mask = (cleaned_df.index >= pd.Timestamp(start_date).tz_localize(None)) & \
        (cleaned_df.index <= pd.Timestamp(end_date).tz_localize(None))
 display_df = cleaned_df.loc[mask]
 
 if display_df.empty:
-    st.error("Selected date range resulted in empty data (maybe weekends/holidays selected?).")
+    st.error("Selected date range resulted in empty data (maybe weekends selected?).")
     st.stop()
 
 # -----------------------------------------------------------------------------
-# VISUALIZATION TAB
+# VISUALIZATION TABS
 # -----------------------------------------------------------------------------
-tab1, tab2, tab3 = st.tabs(["📊 Performance & Charts", "📉 Risk & Correlation", "🤖 AI Volatility Predictor"])
+tab1, tab2, tab3 = st.tabs(["📊 Analysis over Time", "📉 Risk & Correlation", "🤖 AI Volatility Predictor"])
 
+# We create a mapping for the legends
+legend_map = SMI_COMPANIES.copy()
+legend_map["💼 My Portfolio"] = "💼 My Portfolio"
+
+# --- TAB 1: DYNAMIC ANALYSIS (Best of Both Worlds) ---
 with tab1:
-    # --- MAIN CHART (Altair) ---
-    st.subheader("Price Evolution (Indexed to 100)")
+    col_kpi_1, col_kpi_2 = st.columns([1, 3])
     
-    # Normalize data to start at 100 for comparison
-    normalized_df = display_df / display_df.iloc[0] * 100
+    with col_kpi_1:
+        st.subheader("Metric Selection")
+        # FEATURE: Dynamic KPI Selector from V3 restored!
+        metric_options = [ 
+            "Cumulative Return (Indexed to 100)",
+            "Annualized Return (30-Day Rolling)",
+            "Volatility (30-Day Rolling)",
+            "Sharpe Ratio (30-Day Rolling)",
+            "Drawdown (Historical)",
+            "Value at Risk 95% (30-Day Rolling)"
+        ]
+        selected_metric = st.radio("Select Metric to Visualize", metric_options)
     
-    # Convert to long format for Altair
-    plot_data = normalized_df.reset_index().melt('Date', var_name='Asset', value_name='Normalized Price')
-    
-    # Map ticker symbols to readable names for the legend
-    # We create a temporary mapping including 'My Portfolio'
-    legend_map = SMI_COMPANIES.copy()
-    legend_map["💼 My Portfolio"] = "💼 My Portfolio"
-    plot_data['Asset Name'] = plot_data['Asset'].map(lambda x: legend_map.get(x, x))
+    with col_kpi_2:
+        st.subheader("Evolution Chart")
+        
+        # Calculate Plot Data based on selection
+        returns = display_df.pct_change().dropna()
+        window = 30
+        
+        if selected_metric == "Cumulative Return (Indexed to 100)":
+            plot_data = display_df / display_df.iloc[0] * 100
+        elif selected_metric == "Annualized Return (30-Day Rolling)":
+            plot_data = returns.rolling(window=window).mean() * 252
+        elif selected_metric == "Volatility (30-Day Rolling)":
+            plot_data = returns.rolling(window=window).std() * np.sqrt(252)
+        elif selected_metric == "Sharpe Ratio (30-Day Rolling)":
+            rolling_ret = returns.rolling(window=window).mean() * 252
+            rolling_vol = returns.rolling(window=window).std() * np.sqrt(252)
+            plot_data = (rolling_ret - rf_rate) / rolling_vol
+        elif selected_metric == "Drawdown (Historical)":
+            cum_rets = (1 + returns).cumprod()
+            running_max = cum_rets.cummax()
+            plot_data = (cum_rets / running_max) - 1
+        elif selected_metric == "Value at Risk 95% (30-Day Rolling)":
+            plot_data = returns.rolling(window=window).quantile(0.05)
+            
+        # Plotting using Matplotlib
+        fig, ax = plt.subplots(figsize=(10, 5))
+        
+        for column in plot_data.columns:
+            # Skip columns with all NaNs (common at start of rolling window)
+            if plot_data[column].isnull().all():
+                continue
+                
+            label_name = legend_map.get(column, column)
+            if column == "💼 My Portfolio":
+                ax.plot(plot_data.index, plot_data[column], label=label_name, linewidth=2.5, linestyle='--')
+            else:
+                ax.plot(plot_data.index, plot_data[column], label=label_name, alpha=0.7)
+        
+        ax.set_title(f"{selected_metric} over Time")
+        ax.set_xlabel("Date")
+        ax.legend(bbox_to_anchor=(1.05, 1), loc='upper left')
+        ax.grid(True, linestyle='--', alpha=0.6)
+        
+        # Formatting Y-Axis based on metric type
+        if "Ratio" not in selected_metric and "Indexed" not in selected_metric:
+             ax.yaxis.set_major_formatter(plt.FuncFormatter(lambda y, _: '{:.1%}'.format(y)))
+             
+        st.pyplot(fig)
 
-    # Replaced Plotly with Altair
-    chart = alt.Chart(plot_data).mark_line().encode(
-        x='Date:T',
-        y=alt.Y('Normalized Price:Q', title='Normalized Price (Start=100)'),
-        color='Asset Name:N',
-        tooltip=['Date:T', 'Asset Name:N', 'Normalized Price:Q']
-    ).interactive()
-    
-    st.altair_chart(chart, use_container_width=True)
-
-    # --- RAW DATA DOWNLOAD ---
+    # Raw Data Download
     with st.expander("See Raw Data"):
         st.dataframe(display_df.tail(10))
         st.download_button(
@@ -304,15 +346,15 @@ with tab1:
             "text/csv"
         )
 
+# --- TAB 2: RISK & CORRELATION ---
 with tab2:
     col1, col2 = st.columns([1, 1])
     
-    # --- KPI TABLE ---
+    # KPI Table
     with col1:
-        st.subheader("Financial KPIs")
+        st.subheader("Financial KPIs Summary")
         kpi_df = calculate_KPI(display_df, risk_free_rate=rf_rate)
         
-        # Formatting for display
         format_dict = {
             'Ann. Return': '{:.2%}',
             'Cumulative Return': '{:.2%}',
@@ -323,70 +365,75 @@ with tab2:
             'VaR (95%)': '{:.2%}'
         }
         
-        # Highlight the Portfolio row if it exists
+        # Highlight Portfolio Row
         st.dataframe(kpi_df.style.format(format_dict).apply(
             lambda x: ['background: #e6f3ff' if x.name == "💼 My Portfolio" else '' for i in x], axis=1
         ))
 
-    # --- CORRELATION MATRIX ---
+    # Correlation Matrix
     with col2:
         st.subheader("Correlation Matrix")
-        st.caption("How much do assets move together? (1.0 = identical, 0.0 = unrelated)")
-        
         if tickers:
-            # Only correlate selected tickers (exclude index and portfolio for clarity if desired)
             corr_df = display_df[tickers].pct_change().corr()
             
-            # Use readable names for axis
+            # Use readable names
             corr_df.index = corr_df.index.map(lambda x: SMI_COMPANIES.get(x, x))
             corr_df.columns = corr_df.columns.map(lambda x: SMI_COMPANIES.get(x, x))
             
-            # Replaced Plotly Heatmap with Altair Heatmap
-            corr_melt = corr_df.reset_index().rename(columns={'index': 'Asset 1'}).melt(
-                id_vars='Asset 1', var_name='Asset 2', value_name='Correlation'
-            )
-
-            heatmap = alt.Chart(corr_melt).mark_rect().encode(
-                x='Asset 1:O',
-                y='Asset 2:O',
-                color=alt.Color('Correlation:Q', scale=alt.Scale(scheme='redblue', domain=[-1, 1])),
-                tooltip=['Asset 1', 'Asset 2', alt.Tooltip('Correlation', format='.2f')]
-            )
-
-            text = heatmap.mark_text(baseline='middle').encode(
-                text=alt.Text('Correlation:Q', format='.2f'),
-                color=alt.condition(
-                    alt.datum.Correlation > 0.5, 
-                    alt.value('white'),
-                    alt.value('black')
-                )
-            )
-
-            st.altair_chart(heatmap + text, use_container_width=True)
+            fig_corr, ax_corr = plt.subplots(figsize=(8, 6))
+            cax = ax_corr.imshow(corr_df, cmap='RdBu_r', vmin=-1, vmax=1)
+            fig_corr.colorbar(cax)
+            
+            # Ticks
+            ax_corr.set_xticks(np.arange(len(corr_df.columns)))
+            ax_corr.set_yticks(np.arange(len(corr_df.index)))
+            ax_corr.set_xticklabels(corr_df.columns, rotation=45, ha="right")
+            ax_corr.set_yticklabels(corr_df.index)
+            
+            # Text Annotations
+            for i in range(len(corr_df.index)):
+                for j in range(len(corr_df.columns)):
+                    val = corr_df.iloc[i, j]
+                    text_color = "white" if abs(val) > 0.5 else "black"
+                    ax_corr.text(j, i, f"{val:.2f}", ha="center", va="center", color=text_color)
+            
+            ax_corr.set_title("Correlation Heatmap")
+            st.pyplot(fig_corr)
         else:
             st.info("Select stocks to see correlation.")
 
-    # --- RISK/RETURN SCATTER ---
+    # Risk-Return Scatter
     st.subheader("Risk vs. Return Landscape")
     
-    # Prepare data for scatter
     scatter_data = kpi_df.reset_index().rename(columns={'index': 'Asset'})
     scatter_data['Asset Name'] = scatter_data['Asset'].map(lambda x: legend_map.get(x, x))
     
-    # Replaced Plotly Scatter with Altair Scatter
-    scatter = alt.Chart(scatter_data).mark_circle(size=100).encode(
-        x=alt.X('Ann. Volatility', axis=alt.Axis(format='%', title='Risk (Ann. Volatility)')),
-        y=alt.Y('Ann. Return', axis=alt.Axis(format='%', title='Return (Ann. Return)')),
-        color='Asset Name',
-        tooltip=['Asset Name', 'Ann. Return', 'Ann. Volatility', 'Sharpe Ratio', 'Max Drawdown']
-    ).interactive()
+    fig_scatter, ax_scatter = plt.subplots(figsize=(10, 6))
+    
+    x_vals = scatter_data['Ann. Volatility']
+    y_vals = scatter_data['Ann. Return']
+    
+    # Plot dots
+    ax_scatter.scatter(x_vals, y_vals, s=100, alpha=0.7, c='dodgerblue', edgecolors='k')
+    
+    # Add labels
+    for i, txt in enumerate(scatter_data['Asset Name']):
+        ax_scatter.annotate(txt, (x_vals[i], y_vals[i]), xytext=(5, 5), textcoords='offset points')
+        
+    ax_scatter.axhline(0, color='gray', linestyle='--', alpha=0.5)
+    ax_scatter.axvline(0, color='gray', linestyle='--', alpha=0.5)
+    
+    ax_scatter.set_xlabel("Annualized Volatility (Risk)")
+    ax_scatter.set_ylabel("Annualized Return")
+    ax_scatter.set_title("Risk-Return Tradeoff")
+    ax_scatter.grid(True, alpha=0.3)
+    
+    ax_scatter.xaxis.set_major_formatter(plt.FuncFormatter(lambda x, _: '{:.0%}'.format(x)))
+    ax_scatter.yaxis.set_major_formatter(plt.FuncFormatter(lambda y, _: '{:.0%}'.format(y)))
 
-    # Add crosshairs at 0
-    rule_x = alt.Chart(pd.DataFrame({'x': [0]})).mark_rule(strokeDash=[5, 5]).encode(x='x')
-    rule_y = alt.Chart(pd.DataFrame({'y': [0]})).mark_rule(strokeDash=[5, 5]).encode(y='y')
+    st.pyplot(fig_scatter)
 
-    st.altair_chart(scatter + rule_x + rule_y, use_container_width=True)
-
+# --- TAB 3: MACHINE LEARNING ---
 with tab3:
     st.subheader("🤖 AI Volatility Forecast")
     st.write("Using **Random Forest Regression** to predict future market turbulence based on recent patterns.")
@@ -394,7 +441,6 @@ with tab3:
     col_ml_1, col_ml_2 = st.columns(2)
     
     with col_ml_1:
-        # Filter options to only actual tickers (exclude Portfolio/Index usually, or keep them)
         ml_options = list(display_df.columns)
         ml_ticker = st.selectbox("Select Asset to Predict", ml_options, format_func=lambda x: legend_map.get(x, x))
     
@@ -405,7 +451,7 @@ with tab3:
 
     if st.button("Train Model & Predict"):
         with st.spinner("Training Random Forest Model..."):
-            # Use CLEANED_DF (full history) for training, not just display slice
+            # Use CLEANED_DF (full history) for training
             series = cleaned_df[ml_ticker]
             X, y = prepare_regression_data(series, window=21, horizon=horizon_val)
             
@@ -423,7 +469,7 @@ with tab3:
                 preds = model.predict(X_test)
                 mae = mean_absolute_error(y_test, preds)
                 
-                # Future Prediction (using the very latest available data points)
+                # Future Prediction
                 latest_features = X.iloc[-1:].values
                 future_pred = model.predict(latest_features)[0]
                 
@@ -433,19 +479,19 @@ with tab3:
                 c2.metric("Model Accuracy (MAE)", f"{mae:.2%}", delta_color="inverse")
                 c3.metric("Current Hist. Volatility (Last 21d)", f"{series.pct_change().abs().tail(21).mean():.2%}")
                 
-                # Plot Actual vs Predicted on Test Set
-                res_df = pd.DataFrame({'Date': y_test.index, 'Actual': y_test.values, 'Predicted': preds})
-                res_melt = res_df.melt('Date', var_name='Type', value_name='Volatility')
+                # Plot Actual vs Predicted on Test Set (Matplotlib)
+                fig_ml, ax_ml = plt.subplots(figsize=(10, 5))
+                ax_ml.plot(y_test.index, y_test.values, label='Actual Volatility', alpha=0.7)
+                ax_ml.plot(y_test.index, preds, label='Predicted Volatility', linestyle='--', color='orange')
                 
-                # Replaced Plotly Line with Altair Line
-                ml_chart = alt.Chart(res_melt).mark_line().encode(
-                    x='Date:T',
-                    y=alt.Y('Volatility:Q', axis=alt.Axis(format='%')),
-                    color='Type:N',
-                    tooltip=['Date:T', 'Type:N', alt.Tooltip('Volatility:Q', format='.2%')]
-                ).properties(title="Model Validation: Actual vs Predicted Volatility (Test Set)").interactive()
+                ax_ml.set_title("Model Validation: Actual vs Predicted Volatility (Test Set)")
+                ax_ml.set_ylabel("Volatility")
+                ax_ml.legend()
+                ax_ml.grid(True, alpha=0.3)
                 
-                st.altair_chart(ml_chart, use_container_width=True)
+                ax_ml.yaxis.set_major_formatter(plt.FuncFormatter(lambda y, _: '{:.1%}'.format(y)))
+                
+                st.pyplot(fig_ml)
                 
             else:
                 st.error("Not enough historical data to train model. Try selecting an older start date.")

@@ -210,6 +210,11 @@ with st.sidebar:
 # MAIN APP LOGIC
 # -----------------------------------------------------------------------------
 try:
+    # 0. CHECK IF STOCKS ARE SELECTED
+    if not tickers:
+        st.warning("Please select a stock")
+        st.stop()
+        
     # 1. PREPARE TICKER LIST
     tickers_to_load = list(set(tickers + ["^SSMI"])) 
 

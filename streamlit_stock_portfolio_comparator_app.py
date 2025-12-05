@@ -119,8 +119,8 @@ def load_data(ticker_list, start, end):
 st.title("📈 SMI Stock & Portfolio Comparator")
 
 # NAVIGATION ON MAIN PAGE
-# We use st.radio with horizontal=True to create a navbar-like feel at the top
-page = st.radio("Navigation", ["KPI Visualizer", "Risk & Correlation", "Volatility Forecasting"], horizontal=True, label_visibility="collapsed")
+# Added "Guide" as the first option
+page = st.radio("Navigation", ["Guide", "KPI Visualizer", "Risk & Correlation", "Volatility Forecasting"], horizontal=True, label_visibility="collapsed")
 st.markdown("---")
 
 # SIDEBAR: CONTROLS
@@ -251,9 +251,49 @@ try:
         display_df = cleaned_df.loc[display_start:display_end]
 
         # -----------------------------------------------------------------------------
-        # PAGE 1: KPI VISUALIZER
+        # PAGE 1: GUIDE (NEW LANDING PAGE)
         # -----------------------------------------------------------------------------
-        if page == "KPI Visualizer":
+        if page == "Guide":
+            st.header("👋 Welcome to the SMI Stock & Portfolio Comparator")
+            
+            st.markdown("""
+            This application is designed to help **Swiss Investors** look beyond simple price charts. 
+            It enables you to analyze historical performance, understand complex risk metrics, and even forecast future volatility using Machine Learning.
+            """)
+            
+            st.subheader("📚 How to use this App")
+            
+            col_g1, col_g2, col_g3 = st.columns(3)
+            
+            with col_g1:
+                st.info("📊 **KPI Visualizer**")
+                st.write("View historical performance over time. Compare your portfolio against the SMI Benchmark and visualize metrics like Drawdowns and Cumulative Returns.")
+                
+            with col_g2:
+                st.warning("📉 **Risk & Correlation**")
+                st.write("Deep dive into the Risk-Return relationship. Use the Scatter Plot to find the 'Efficient Frontier' and use the Heatmap to check if your stocks are diversified.")
+                
+            with col_g3:
+                st.success("🤖 **Volatility Forecasting**")
+                st.write("Use our Random Forest Machine Learning model to predict how volatile a stock might be in the future (Next Day, Week, or Month).")
+            
+            st.markdown("---")
+            st.subheader("📖 Financial Glossary")
+            st.write("Understanding the metrics used in this application:")
+            
+            with st.expander("See Definitions", expanded=True):
+                st.markdown("""
+                * **Sharpe Ratio:** Measures the performance of an investment compared to a risk-free asset, after adjusting for its risk. **Higher is better.** (Formula: Excess Return / Volatility)
+                * **Sortino Ratio:** Similar to Sharpe, but only penalizes *negative* volatility (downside risk). It ignores upside volatility, which is usually good for investors. **Higher is better.**
+                * **Max Drawdown:** The maximum observed loss from a peak to a trough of a portfolio, before a new peak is attained. It indicates the "worst case scenario" for holding a stock. **Closer to 0% is better.**
+                * **Value at Risk (95%):** Estimates how much a set of investments might lose (with a 95% confidence level), given normal market conditions. If VaR is -2%, it means in 95 out of 100 days, you won't lose more than 2%.
+                * **Volatility:** A statistical measure of the dispersion of returns. High volatility means the price swings up and down drastically.
+                """)
+
+        # -----------------------------------------------------------------------------
+        # PAGE 2: KPI VISUALIZER
+        # -----------------------------------------------------------------------------
+        elif page == "KPI Visualizer":
             st.subheader("📊 KPI Visualizer over Time")
             
             # Raw Data Preview
@@ -324,7 +364,7 @@ try:
                 st.info("Not enough shared data points to plot a comparison. Try adjusting dates.") 
 
         # -----------------------------------------------------------------------------
-        # PAGE 2: RISK & CORRELATION
+        # PAGE 3: RISK & CORRELATION
         # -----------------------------------------------------------------------------
         elif page == "Risk & Correlation":
             st.subheader("📉 Risk & Return Analysis")
@@ -422,7 +462,7 @@ try:
                     st.info("Select at least 2 stocks (or 1 stock + Benchmark) to view correlations.")
 
         # -----------------------------------------------------------------------------
-        # PAGE 3: VOLATILITY FORECASTING
+        # PAGE 4: VOLATILITY FORECASTING
         # -----------------------------------------------------------------------------
         elif page == "Volatility Forecasting":
             st.subheader("🤖 Machine Learning: Volatility Prediction") 

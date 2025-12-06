@@ -309,9 +309,9 @@ try:
                 * **Cumulative Return:** The total percentage change in the price of an investment over a specific period.
                 * **Annualized Return:** The geometric average amount of money earned by an investment each year over a given time period. It allows for comparison between investments held for different lengths of time.
                 * **Volatility:** A statistical measure of the dispersion of returns. High volatility means the price swings up and down drastically.
-                * **Sharpe Ratio:** Measures the performance of an investment compared to a risk-free asset, after adjusting for its risk. **The higher, the better.** (Formula: Excess Return / Volatility)
-                * **Sortino Ratio:** Similar to the Sharpe Ratio, but it only penalizes *negative* volatility (downside risk). It ignores upside volatility, which is usually good for investors. **The higher, the better.**
-                * **Maximum Drawdown:** The maximum observed loss from a peak to a low of a portfolio, before a new peak is attained. It indicates the "worst case scenario" for holding a stock. **The closer to 0%, the better.**
+                * **Sharpe Ratio:** Measures the performance of an investment compared to a risk-free asset, after adjusting for its risk.
+                * **Sortino Ratio:** Similar to the Sharpe Ratio, but it only penalizes *negative* volatility (downside risk). It ignores upside volatility, which is usually good for investors.
+                * **Maximum Drawdown:** The maximum observed loss from a peak to a low of a portfolio, before a new peak is attained. It indicates the "worst case scenario" for holding a stock.
                 * **Value at Risk (95%):** Estimates how much a set of investments might lose on a single day (with a 95% confidence level), given normal market conditions. For example, if VaR is -2%, it means in 95 out of 100 days, you won't lose more than 2%.
                 * **Volatility:** A statistical measure of the dispersion of returns. High volatility means the price swings up and down drastically.        """)
 
